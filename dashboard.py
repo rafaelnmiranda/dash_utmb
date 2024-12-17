@@ -16,7 +16,7 @@ if uploaded_file:
     # ------------------- CORREÇÃO DAS CIDADES -------------------
     st.header("📍 Correção de Cidades")
     # URL do GitHub com a base de cidades corrigidas (substitua pelo seu link)
-    correction_url = "https://raw.githubusercontent.com/SEU_USUARIO/SEU_REPOSITORIO/main/cities_correction.csv"
+    correction_url = "https://github.com/rafaelnmiranda/dash_utmb/blob/main/cidades.csv"
     
     # Carregar a tabela de correção de cidades
     city_corrections = pd.read_csv(correction_url)
