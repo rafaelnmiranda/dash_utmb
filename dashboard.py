@@ -13,7 +13,8 @@ if uploaded_file:
     df = pd.read_excel(uploaded_file, sheet_name="registrations_sheet_name")
 
     # Tratamento da Data
-    df['Registration date'] = pd.to_datetime(df['Registration date'])
+    df['Registration date'] = pd.to_datetime(df['Registration date'], errors='coerce')
+    df = df.dropna(subset=['Registration date'])  # Remove registros sem data válida
     df['Day of Week'] = df['Registration date'].dt.day_name()
     df['Hour'] = df['Registration date'].dt.hour
 
@@ -35,11 +36,15 @@ if uploaded_file:
     date_range = st.sidebar.date_input("Período de Inscrições", 
                                        [df['Registration date'].min(), df['Registration date'].max()])
 
+    # Garantir datas válidas
+    start_date = pd.to_datetime(date_range[0])
+    end_date = pd.to_datetime(date_range[1])
+
     # Aplicar Filtros
     filtered_df = df[
         (df['Country'].isin(selected_country)) &
         (df['Competition'].isin(selected_competition)) &
-        (df['Registration date'].between(date_range[0], date_range[1]))
+        (df['Registration date'].between(start_date, end_date))
     ]
 
     # Gráfico de Inscrições por Cidade
