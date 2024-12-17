@@ -28,6 +28,9 @@ if uploaded_file:
     # Merge Metas e Real
     metas_df = metas.merge(inscritos, on="Percurso", how="left").fillna(0)
     metas_df['Inscritos'] = metas_df['Inscritos'].astype(int)
+    metas_df['% da Meta'] = (metas_df['Inscritos'] / metas_df['Meta 2025'] * 100).fillna(0).round(2).astype(str) + '%'
+
+    # Exibir tabela com % da meta
     st.table(metas_df)
 
     # ------------------- META DE MULHERES -------------------
@@ -35,19 +38,22 @@ if uploaded_file:
     total_mulheres = df[df['T-shirt size (woman)'].notnull()].shape[0]
     total_homens = len(df) - total_mulheres
 
-    # Criar gráfico de barras horizontais
+    # Calcular percentuais
+    perc_mulheres = (total_mulheres / len(df)) * 100
+    perc_homens = 100 - perc_mulheres
+
+    # Criar gráfico de barras horizontais com percentuais
     fig_gender = px.bar(
-        x=[total_mulheres, total_homens],
+        x=[perc_mulheres, perc_homens],
         y=["Mulheres", "Homens"],
         orientation='h',
-        text_auto=True,
-        title="Distribuição de Gênero"
+        text=[f"{perc_mulheres:.2f}%", f"{perc_homens:.2f}%"],
+        title="Distribuição de Gênero (%)",
     )
     st.plotly_chart(fig_gender)
 
     # Mostrar indicador de progresso
-    current_percentage = (total_mulheres / len(df)) * 100
-    st.metric("Percentual Atual de Mulheres", f"{current_percentage:.2f}%", delta=f"{40 - current_percentage:.2f}% para meta")
+    st.metric("Percentual Atual de Mulheres", f"{perc_mulheres:.2f}%", delta=f"{40 - perc_mulheres:.2f}% para meta")
 
     # ------------------- CORREÇÃO DE CIDADES -------------------
     st.header("📍 Top 10 Cidades - Brasil")
