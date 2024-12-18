@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-from rapidfuzz import process, fuzz
+#imports removidos temporariamente: from rapidfuzz import process, fuzz
 import requests
 from io import BytesIO
 
@@ -17,13 +17,6 @@ def load_ibge_municipios():
     else:
         st.error("Erro ao carregar a base de municípios do IBGE. Verifique o link e tente novamente.")
         return None
-
-# Função para realizar o fuzzy matching
-def fuzzy_match_cities(city_name, official_cities):
-    if pd.isna(city_name):
-        return None
-    match, score = process.extractOne(city_name, official_cities, scorer=fuzz.token_sort_ratio)
-    return match if score > 80 else city_name
 
 # Upload da Planilha
 uploaded_file = st.file_uploader("Carregue sua planilha de inscrições", type=["xlsx"])
@@ -75,24 +68,15 @@ if uploaded_file:
     st.metric("Percentual Atual de Mulheres", f"{perc_mulheres:.2f}%", delta=f"{40 - perc_mulheres:.2f}% para meta")
 
     # ------------------- CORREÇÃO DE CIDADES -------------------
-    st.header("\ud83d\udccd Correção Automática de Cidades")
+    st.header("\ud83d\udccd Correção Automática de Cidades (Função temporariamente desativada)")
     municipios_ibge = load_ibge_municipios()
 
     if municipios_ibge is not None:
         # Lista oficial de cidades do IBGE
         official_cities = municipios_ibge['City'].dropna().unique().tolist()
         
-        # Aplicar o fuzzy matching
-        st.text("Realizando a correção dos nomes das cidades, isso pode levar alguns segundos...")
-        df['Corrected City'] = df['City'].apply(lambda x: fuzzy_match_cities(x, official_cities))
-
-        # Filtrar apenas cidades do Brasil
-        df_brazil = df[df['Country'].str.upper().isin(['BRAZIL', 'BR'])]
-
-        # Top 10 cidades
-        top_cities = df_brazil['Corrected City'].value_counts().head(10).reset_index()
-        top_cities.columns = ['City', 'Total Athletes']
-        st.table(top_cities)
+        # Mensagem Temporária para Usuário
+        st.text("Correção de cidades desativada temporariamente. Utilize outras funcionalidades do Dashboard.")
 
     # ------------------- NACIONALIDADE DOS ATLETAS -------------------
     st.header("\ud83c\udf0e Nacionalidade dos Atletas")
