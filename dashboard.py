@@ -27,7 +27,7 @@ if uploaded_file:
     df['Registration date'] = pd.to_datetime(df['Registration date'], errors='coerce')
 
     # ------------------- METAS DE INSCRITOS -------------------
-    st.header("\ud83d\udcca Metas de Inscritos por Percurso")
+    st.header("Metas de Inscritos por Percurso")
     metas = pd.DataFrame({
         "Percurso": ["FUN 7km", "PTR 20", "PTR 35", "PTR 55", "UTSB 100", "Total"],
         "Meta 2025": [900, 900, 620, 770, 310, 3500]
@@ -46,7 +46,7 @@ if uploaded_file:
     st.table(metas_df)
 
     # ------------------- META DE MULHERES -------------------
-    st.header("\ud83d\udc69 Percentual de Mulheres (Meta: 40%)")
+    st.header("Percentual de Mulheres (Meta: 40%)")
     total_mulheres = df[df['T-shirt size (woman)'].notnull()].shape[0]
     total_homens = len(df) - total_mulheres
 
@@ -68,7 +68,7 @@ if uploaded_file:
     st.metric("Percentual Atual de Mulheres", f"{perc_mulheres:.2f}%", delta=f"{40 - perc_mulheres:.2f}% para meta")
 
     # ------------------- CORREÇÃO DE CIDADES -------------------
-    st.header("\ud83d\udccd Correção Automática de Cidades (Função temporariamente desativada)")
+    st.header("Correção Automática de Cidades (Função temporariamente desativada)")
     municipios_ibge = load_ibge_municipios()
 
     if municipios_ibge is not None:
@@ -79,7 +79,7 @@ if uploaded_file:
         st.text("Correção de cidades desativada temporariamente. Utilize outras funcionalidades do Dashboard.")
 
     # ------------------- NACIONALIDADE DOS ATLETAS -------------------
-    st.header("\ud83c\udf0e Nacionalidade dos Atletas")
+    st.header("Nacionalidade dos Atletas")
     total_countries = df['Nationality'].nunique()
     st.write(f"**Número total de países inscritos:** {total_countries}")
 
