@@ -93,3 +93,38 @@ if uploaded_file:
     foreign_count = len(df) - brazilian_count
     st.write(f"**Brasileiros:** {brazilian_count} ({brazilian_count/len(df):.1%})")
     st.write(f"**Estrangeiros:** {foreign_count} ({foreign_count/len(df):.1%})")
+
+    # ------------------- ANÁLISES FINANCEIRAS -------------------
+    st.header("Análises Financeiras")
+
+    # Receita Bruta e Receita Líquida
+    df['Total Amount'] = df['Discounts amount'] + df['Registration amount']
+    total_revenue = df['Total Amount'].sum()
+    net_revenue = df['Registration amount'].sum()
+    st.metric("Receita Bruta", f"R$ {total_revenue:,.2f}")
+    st.metric("Receita Líquida", f"R$ {net_revenue:,.2f}")
+
+    # Análise de Cupons de Desconto
+    st.subheader("Cupons de Desconto")
+    coupon_groups = df['Coupon'].fillna('OUTROS').str.upper().str.extract(r'(PTY25|TG25|TP25|VIP25|GP25)', expand=False).fillna('OUTROS')
+    df['Coupon Group'] = coupon_groups[0]
+
+    coupon_summary = df.groupby('Coupon Group').agg(
+        Total_Discounts=pd.NamedAgg(column='Discounts amount', aggfunc='sum'),
+        Count=pd.NamedAgg(column='Coupon Group', aggfunc='size')
+    ).reset_index()
+
+    st.table(coupon_summary)
+
+    # Receita por Percurso
+    st.subheader("Receita por Percurso")
+    revenue_by_competition = df.groupby('Competition').agg(
+        Total_Inscritos=pd.NamedAgg(column='Competition', aggfunc='size'),
+        Receita_Bruta=pd.NamedAgg(column='Total Amount', aggfunc='sum'),
+        Receita_Líquida=pd.NamedAgg(column='Registration amount', aggfunc='sum'),
+        Total_Descontos=pd.NamedAgg(column='Discounts amount', aggfunc='sum'),
+        Quantidade_Descontos=pd.NamedAgg(column='Discounts amount', aggfunc=lambda x: x[x > 0].count()),
+        Percentual_Mulheres=pd.NamedAgg(column='T-shirt size (woman)', aggfunc=lambda x: x.notnull().mean() * 100)
+    ).reset_index()
+
+    st.table(revenue_by_competition)
