@@ -106,15 +106,18 @@ if uploaded_file:
 
     # Análise de Cupons de Desconto
     st.subheader("Cupons de Desconto")
-    coupon_groups = df['Coupon'].fillna('OUTROS').str.upper().str.extract(r'(PTY25|TG25|TP25|VIP25|GP25)', expand=False).fillna('OUTROS')
-    df['Coupon Group'] = coupon_groups[0]
+    if 'Discount code' in df.columns:
+        coupon_groups = df['Discount code'].fillna('OUTROS').str.upper().str.extract(r'(PTY25|TG25|TP25|VIP25|GP25)', expand=False).fillna('OUTROS')
+        df['Coupon Group'] = coupon_groups[0]
 
-    coupon_summary = df.groupby('Coupon Group').agg(
-        Total_Discounts=pd.NamedAgg(column='Discounts amount', aggfunc='sum'),
-        Count=pd.NamedAgg(column='Coupon Group', aggfunc='size')
-    ).reset_index()
+        coupon_summary = df.groupby('Coupon Group').agg(
+            Total_Discounts=pd.NamedAgg(column='Discounts amount', aggfunc='sum'),
+            Count=pd.NamedAgg(column='Coupon Group', aggfunc='size')
+        ).reset_index()
 
-    st.table(coupon_summary)
+        st.table(coupon_summary)
+    else:
+        st.warning("A coluna 'Discount code' não foi encontrada na base de dados. Verifique sua planilha.")
 
     # Receita por Percurso
     st.subheader("Receita por Percurso")
