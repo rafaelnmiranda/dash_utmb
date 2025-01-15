@@ -26,6 +26,10 @@ if uploaded_file:
     df = pd.read_excel(uploaded_file, sheet_name="registrations_sheet_name")
     df['Registration date'] = pd.to_datetime(df['Registration date'], errors='coerce')
 
+    # Ajustando o formato do campo 'Discounts amount'
+    if 'Discounts amount' in df.columns:
+        df['Discounts amount'] = pd.to_numeric(df['Discounts amount'], errors='coerce').fillna(0)
+
     # ------------------- METAS DE INSCRITOS -------------------
     st.header("Metas de Inscritos por Percurso")
     metas = pd.DataFrame({
