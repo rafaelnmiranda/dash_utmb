@@ -30,6 +30,24 @@ if uploaded_file:
     if 'Discounts amount' in df.columns:
         df['Discounts amount'] = pd.to_numeric(df['Discounts amount'], errors='coerce').fillna(0)
 
+    # Classificando descontos
+    if 'Discount code' in df.columns:
+        df['Discount Type'] = df['Discount code'].apply(lambda x: 'Link' if str(x).endswith('25') else 'Real')
+
+        # Tabela de análise de descontos
+        discount_summary = df.groupby(['Competition', 'Discount Type']).agg(
+            Total_Descontos=pd.NamedAgg(column='Discounts amount', aggfunc='sum'),
+            Quantidade_Descontos=pd.NamedAgg(column='Discounts amount', aggfunc=lambda x: (x > 0).sum())
+        ).unstack(fill_value=0)
+
+        # Ajustar formatação das colunas
+        discount_summary.columns = ['Quantidade_Descontos_Link', 'Quantidade_Descontos_Real', 'Total_Descontos_Link', 'Total_Descontos_Real']
+        discount_summary = discount_summary.reset_index()
+
+        # Exibir a tabela
+        st.subheader("Análise de Descontos por Tipo e Percurso")
+        st.table(discount_summary)
+
     # ------------------- METAS DE INSCRITOS -------------------
     st.header("Metas de Inscritos por Percurso")
     metas = pd.DataFrame({
@@ -111,7 +129,7 @@ if uploaded_file:
     # Análise de Cupons de Desconto
     st.subheader("Cupons de Desconto")
     if 'Discount code' in df.columns:
-        coupon_groups = df['Discount code'].fillna('OUTROS').str.upper().str.extract(r'(PTY25|TG25|TP25|VIP25|GP25)', expand=False).fillna('OUTROS')
+        coupon_groups = df['Discount code'].fillna('OUTROS').str.upper().str.extract(r'(PTY25|TG25|TP25|GP25)', expand=False).fillna('OUTROS')
         df['Coupon Group'] = coupon_groups[0]
 
         coupon_summary = df.groupby('Coupon Group').agg(
