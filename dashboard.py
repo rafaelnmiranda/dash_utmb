@@ -332,6 +332,45 @@ fig_weekly.update_traces(textposition='outside')
 st.plotly_chart(fig_weekly)
 
 
+### Gráfico de Barras: Média de Inscrições por Dia da Semana (2025)
+
+# Filtra somente os registros de 2025
+df_2025_dia = df_total[df_total['Ano'] == 2025].copy()
+# Cria uma coluna 'Date' sem o componente de hora
+df_2025_dia['Date'] = pd.to_datetime(df_2025_dia['Registration date'].dt.date)
+
+# Agrupa as inscrições por dia (calculando o número total de inscrições para cada data)
+daily_counts = df_2025_dia.groupby('Date').size().reset_index(name='Inscritos')
+
+# Extrai o dia da semana para cada data (0 = Segunda, 6 = Domingo)
+daily_counts['Weekday'] = daily_counts['Date'].dt.dayofweek
+
+# Agrupa por dia da semana e calcula a média de inscrições
+weekday_avg = daily_counts.groupby('Weekday')['Inscritos'].mean().reset_index(name='Media Inscritos')
+# Arredonda a média para 2 casas decimais
+weekday_avg['Media Inscritos'] = weekday_avg['Media Inscritos'].round(2)
+
+# Mapeia os números dos dias para nomes (em português), iniciando na Segunda
+weekday_names = {0: "Segunda", 1: "Terça", 2: "Quarta", 3: "Quinta", 4: "Sexta", 5: "Sábado", 6: "Domingo"}
+weekday_avg['Dia da Semana'] = weekday_avg['Weekday'].map(weekday_names)
+
+# Organiza os dados pelo número do dia da semana para garantir a ordem correta (segunda a domingo)
+weekday_avg = weekday_avg.sort_values('Weekday')
+
+# Cria o gráfico de barras com Plotly Express
+fig_weekday = px.bar(
+    weekday_avg,
+    x='Dia da Semana',
+    y='Media Inscritos',
+    text='Media Inscritos',  # Adiciona os valores de média acima das barras
+    title="Média de Inscrições por Dia da Semana - 2025",
+    labels={"Media Inscritos": "Média de Inscrições"}
+)
+
+# Atualiza os traços para exibir o texto com duas casas decimais e posiciona-o acima das barras
+fig_weekday.update_traces(texttemplate='%{text:.2f}', textposition='outside')
+
+st.plotly_chart(fig_weekday)
 
 
 ### 3.7 Gráfico de Inscrições Acumuladas - 2025
