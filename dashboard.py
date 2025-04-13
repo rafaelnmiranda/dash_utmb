@@ -38,10 +38,12 @@ def format_integer_thousands(val):
 
 def standardize_nationality(value):
     """Padroniza os nomes das nacionalidades para contagem única."""
+    if pd.isnull(value):
+        return value
     value = value.strip().upper()
     mapping = {
-        "BRAZIL": "BR",
-        "BRASIL": "BR"
+        "BRASIL": "BR",
+        "BRAZIL": "BR"
         # Adicione outros mapeamentos se necessário.
     }
     return mapping.get(value, value)
@@ -63,7 +65,7 @@ def load_static_data(ano, url):
             df = pd.read_excel(BytesIO(response.content), sheet_name=0)
             df['Registration date'] = pd.to_datetime(df['Registration date'], errors='coerce')
             df['Ano'] = ano
-            # Converter valores monetários (dados 2023/2024 estão em USD)
+            # Converter valores monetários de USD para BRL
             if 'Registration amount' in df.columns:
                 df['Registration amount'] = pd.to_numeric(df['Registration amount'], errors='coerce') * TAXA_CAMBIO
             if 'Discounts amount' in df.columns:
@@ -77,21 +79,20 @@ def load_static_data(ano, url):
         st.error(f"Erro ao carregar dados de {ano}: {e}")
         return None
 
-# URLs para 2023 e 2024 (dados estáticos)
+# URLs dos dados estáticos para 2023 e 2024
 url_2023 = "https://github.com/rafaelnmiranda/dash_utmb/raw/815dda1e46bf0b731212e12a365ad169dc4d4e23/UTMB%20-%202023%20-%20USD.xlsx"
 url_2024 = "https://github.com/rafaelnmiranda/dash_utmb/raw/815dda1e46bf0b731212e12a365ad169dc4d4e23/UTMB%20-%202024%20-%20USD.xlsx"
 
 df_2023 = load_static_data(2023, url_2023)
 df_2024 = load_static_data(2024, url_2024)
 
-# Upload dos arquivos de 2025
+# Upload dos arquivos de 2025 (USD e BRL)
 st.subheader("Carregue os arquivos de inscrições 2025 (USD e BRL)")
 uploaded_files = st.file_uploader("Selecione os arquivos de 2025", type=["xlsx"], accept_multiple_files=True)
 
 dfs_2025 = []
 if uploaded_files:
     for file in uploaded_files:
-        # Identifica a moeda a partir do nome do arquivo
         if "USD" in file.name.upper():
             moeda = "USD"
         elif "R$" in file.name or "BRL" in file.name.upper():
@@ -163,18 +164,15 @@ st.header("Resumo Geral")
 
 ### 3.1 Metas de Inscritos por Percurso - 2025
 st.subheader("Metas de Inscritos por Percurso - 2025")
-# Padroniza os nomes das competições em 2025
 df_2025_inscritos = df_total[df_total['Ano'] == 2025].copy()
 if 'Competition' in df_2025_inscritos.columns:
     df_2025_inscritos['Competition'] = df_2025_inscritos['Competition'].str.upper().str.strip()
 else:
     st.error("Coluna 'Competition' não encontrada em 2025.")
-# Define as metas (nomes padronizados)
 metas = pd.DataFrame({
     "Percurso": ["FUN 7KM", "PTR 20", "PTR 35", "PTR 55", "UTSB 100", "TOTAL"]
 })
 metas["Meta 2025"] = [900, 900, 620, 770, 310, 3500]
-# Agrupar inscritos por competição
 inscritos_2025 = df_2025_inscritos['Competition'].value_counts().reset_index()
 inscritos_2025.columns = ['Percurso', 'Inscritos']
 inscritos_2025['Percurso'] = inscritos_2025['Percurso'].str.upper().str.strip()
@@ -182,40 +180,31 @@ total_inscritos_2025 = inscritos_2025['Inscritos'].sum()
 if 'TOTAL' not in inscritos_2025['Percurso'].values:
     total_row = pd.DataFrame([{'Percurso': 'TOTAL', 'Inscritos': total_inscritos_2025}])
     inscritos_2025 = pd.concat([inscritos_2025, total_row], ignore_index=True)
-# Mescla as metas com a contagem de inscritos
 metas_df = metas.merge(inscritos_2025, on="Percurso", how="left").fillna(0)
 metas_df["Meta 2025"] = metas_df["Meta 2025"].apply(format_integer)
 metas_df["Inscritos"] = metas_df["Inscritos"].apply(format_integer)
 metas_df["% da Meta"] = ((metas_df["Inscritos"].astype(float) / metas_df["Meta 2025"].astype(float)) * 100).fillna(0).apply(format_percentage)
 st.table(metas_df)
 
-### 3.2 Percentual de Mulheres Inscritas (coluna Gender)
-
+### 3.2 Percentual de Mulheres Inscritas (coluna Gender) - somente 2025
 if 'Gender' in df_total.columns:
     df_2025_gender = df_total[df_total['Ano'] == 2025]
     total_reg = df_2025_gender.shape[0]
     num_mulheres = df_2025_gender['Gender'].str.strip().str.upper().isin(['F', 'FEMALE']).sum()
     perc_mulheres = (num_mulheres / total_reg) * 100
-    st.metric("% de Mulheres Inscritas", format_percentage(perc_mulheres))
+    st.metric("% de Mulheres Inscritas (2025)", format_percentage(perc_mulheres))
 else:
     st.info("Coluna 'Gender' não encontrada.")
 
-
-### 3.3 Número de Países Diferentes (coluna Nationality)
+### 3.3 Número de Países Diferentes (coluna Nationality) - somente 2025
 if 'Nationality' in df_total.columns:
-    # Filtra somente os registros de 2025
-    df_2025 = df_total[df_total['Ano'] == 2025].copy()
-    # Padroniza os valores de Nationality (removendo espaços e convertendo para maiúsculas)
-    df_2025['Nationality_std'] = df_2025['Nationality'].dropna().apply(lambda x: x.strip().upper())
-    # Conta os valores únicos
-    num_paises_2025 = df_2025['Nationality_std'].nunique()
-    st.metric("Número de Países Diferentes (2025)", str(num_paises_2025))
-    # Opcional: visualizar a tabela com as frequências
-    freq_std = df_2025['Nationality_std'].value_counts().reset_index()
-    freq_std.columns = ['Nationality', 'Count']
-    st.table(freq_std)
+    df_2025_nat = df_total[df_total['Ano'] == 2025].copy()
+    df_2025_nat['Nationality_std'] = df_2025_nat['Nationality'].dropna().apply(standardize_nationality)
+    num_paises_2025 = df_2025_nat['Nationality_std'].nunique()
+    st.metric("Número de Países Diferentes (2025)", format_integer(num_paises_2025))
 else:
-    st.write("Coluna 'Nationality' não encontrada.")
+    st.info("Coluna 'Nationality' não encontrada.")
+
 ### 3.4 Tabela de Participação dos Atletas (baseado em Email)
 st.subheader("Participação dos Atletas por Ano (baseado em Email)")
 set_2023 = set(df_total[df_total['Ano'] == 2023]['Email'].dropna().unique())
@@ -240,6 +229,15 @@ participation = pd.DataFrame({
 })
 participation['Quantidade'] = participation['Quantidade'].apply(format_integer)
 st.table(participation)
+
+# --- Diagrama de Venn para Participação dos Atletas ---
+from matplotlib_venn import venn3
+import matplotlib.pyplot as plt
+
+plt.figure(figsize=(8, 8))
+venn3([set_2023, set_2024, set_2025], set_labels=('2023', '2024', '2025'))
+plt.title("Participação dos Atletas por Ano (Diagrama de Venn)")
+st.pyplot(plt)
 
 ### 3.5 Top 10 Países Inscritos em 2025
 if 'Nationality' in df_total.columns:
@@ -338,7 +336,7 @@ col2.metric("Receita Líquida (R$)", format_currency(receita_liquida))
 col3.metric("Total Inscritos Únicos", format_integer(total_inscritos_fin))
 
 # -----------------------------------------------------
-# 5. Layout com Abas para Análises Detalhadas
+# 5. Layout com Abas para Análises Detalhadas (Métricas Financeiras)
 # -----------------------------------------------------
 tab1, tab2, tab3 = st.tabs(["Inscritos", "Análises Financeiras", "Comparativo Entre Anos"])
 
@@ -372,7 +370,6 @@ with tab2:
     else:
         st.info("Não há informações de cupom de desconto na base.")
     
-    # Agrupamento para métricas financeiras por competição
     grp = df_financial.groupby('Competition').agg({
         'Registration amount': 'sum',
         'Discounts amount': 'sum'
