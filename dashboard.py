@@ -230,16 +230,16 @@ participation = pd.DataFrame({
 participation['Quantidade'] = participation['Quantidade'].apply(format_integer)
 st.table(participation)
 
-"""
-# --- Diagrama de Venn para Participação dos Atletas ---
-from matplotlib_venn import venn3
-import matplotlib.pyplot as plt
 
-plt.figure(figsize=(8, 8))
-venn3([set_2023, set_2024, set_2025], set_labels=('2023', '2024', '2025'))
-plt.title("Participação dos Atletas por Ano (Diagrama de Venn)")
-st.pyplot(plt)
-"""
+# --- Diagrama de Venn para Participação dos Atletas ---
+#from matplotlib_venn import venn3
+#import matplotlib.pyplot as plt
+
+#plt.figure(figsize=(8, 8))
+#venn3([set_2023, set_2024, set_2025], set_labels=('2023', '2024', '2025'))
+#plt.title("Participação dos Atletas por Ano (Diagrama de Venn)")
+#st.pyplot(plt)
+
 
 ### 3.5 Top 10 Países Inscritos em 2025
 if 'Nationality' in df_total.columns:
@@ -273,30 +273,37 @@ st.table(comp_cutoff)
 
 ### Gráfico de Barras: Inscrições por Semana (Últimas 10 Semanas) - 2025
 
-# Garante que estamos trabalhando apenas com os registros de 2025
 df_2025_acc = df_total[df_total['Ano'] == 2025].copy()
-# Cria uma coluna de data sem a parte de tempo
+# Converte para data (sem o componente de hora)
 df_2025_acc['Date'] = pd.to_datetime(df_2025_acc['Registration date'].dt.date)
 df_2025_acc = df_2025_acc.sort_values('Date')
 
-# Define a data base como a data mais recente de venda
+# Define a data base como a mais recente
 last_date = df_2025_acc['Date'].max()
-# Define a data de início como 10 semanas antes da data base
+# Obtém a data de início das últimas 10 semanas
 start_date = last_date - pd.Timedelta(weeks=10)
 
-# Filtra os registros para as últimas 10 semanas
+# Filtra as inscrições dentro dessas últimas 10 semanas
 df_last_10 = df_2025_acc[df_2025_acc['Date'] >= start_date]
 
-# Agrupa os registros por semana usando o pd.Grouper com frequência semanal (freq='W')
+# Agrupa as inscrições por semana (freq='W')
 weekly_counts = df_last_10.groupby(pd.Grouper(key='Date', freq='W')).size().reset_index(name='Inscritos')
 
-# Cria um gráfico de barras com Plotly Express
-fig_weekly = px.bar(weekly_counts, 
-                    x='Date', 
-                    y='Inscritos', 
-                    title="Inscrições Vendidas por Semana (Últimas 10 Semanas) - 2025",
-                    labels={"Date": "Semana", "Inscritos": "Quantidade de Inscrições"})
+# Cria o gráfico de barras com Plotly, exibindo o valor no topo de cada barra
+fig_weekly = px.bar(
+    weekly_counts,
+    x='Date',
+    y='Inscritos',
+    text='Inscritos',  # <-- Adiciona o texto com o valor de 'Inscritos' em cada barra
+    title="Inscrições Vendidas por Semana (Últimas 10 Semanas) - 2025",
+    labels={"Date": "Semana", "Inscritos": "Quantidade de Inscrições"}
+)
+
+# Ajusta a posição do texto para ficar fora (acima) das barras
+fig_weekly.update_traces(textposition='outside')
+
 st.plotly_chart(fig_weekly)
+
 
 
 
