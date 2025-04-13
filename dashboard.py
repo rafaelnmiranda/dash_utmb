@@ -295,25 +295,27 @@ st.table(participation)
 from matplotlib_venn import venn3
 import matplotlib.pyplot as plt
 
-# Já temos os conjuntos definidos:
-# set_2023, set_2024, set_2025
-
-# Calcula a quantidade de atletas em cada ano
+# Supondo que você já tenha os conjuntos:
+# set_2023, set_2024 e set_2025 (obtidos a partir dos emails dos atletas para cada ano)
 set_2023_count = len(set_2023)
 set_2024_count = len(set_2024)
 set_2025_count = len(set_2025)
 
-# Cria os labels com os totais
+# Cria as labels com as contagens de cada ano
 labels = (
     f"2023 ({set_2023_count})",
     f"2024 ({set_2024_count})",
     f"2025 ({set_2025_count})"
 )
 
-plt.figure(figsize=(6, 6))
+# Calcula o total de emails únicos (a união dos três conjuntos)
+total_unique = len(set_2023.union(set_2024).union(set_2025))
+
+plt.figure(figsize=(8, 8))
 venn3([set_2023, set_2024, set_2025], set_labels=labels)
-plt.title("Participação dos Atletas por Ano (Diagrama de Venn)")
+plt.title(f"Participação dos Atletas por Ano (TOTAL: {total_unique})")
 st.pyplot(plt)
+
 
 
 
