@@ -295,10 +295,26 @@ st.table(participation)
 from matplotlib_venn import venn3
 import matplotlib.pyplot as plt
 
-plt.figure(figsize=(8, 8))
-venn3([set_2023, set_2024, set_2025], set_labels=('2023', '2024', '2025'))
+# Já temos os conjuntos definidos:
+# set_2023, set_2024, set_2025
+
+# Calcula a quantidade de atletas em cada ano
+set_2023_count = len(set_2023)
+set_2024_count = len(set_2024)
+set_2025_count = len(set_2025)
+
+# Cria os labels com os totais
+labels = (
+    f"2023 ({set_2023_count})",
+    f"2024 ({set_2024_count})",
+    f"2025 ({set_2025_count})"
+)
+
+plt.figure(figsize=(6, 6))
+venn3([set_2023, set_2024, set_2025], set_labels=labels)
 plt.title("Participação dos Atletas por Ano (Diagrama de Venn)")
 st.pyplot(plt)
+
 
 
 ### 3.5 Top 10 Países Inscritos em 2025
