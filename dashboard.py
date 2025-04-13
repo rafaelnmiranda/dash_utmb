@@ -334,35 +334,38 @@ else:
     st.info("Coluna 'Nationality' não encontrada.")
 
 ### 3.6 Comparativo de Inscrições até Data Base
-st.subheader(f"Comparativo de Inscrições até ({data_base_str})")
-
-# Para 2025, usamos a data_base já calculada; se não houver dados, define um valor default.
+# Calcula a data base dinâmica (última inscrição de 2025)
 if df_2025 is not None:
     data_base = df_2025['Registration date'].max()
+    data_base_str = data_base.strftime("%d/%m")
 else:
-    data_base = pd.Timestamp("2025-04-12")  # valor default caso não haja dados
+    data_base_str = "N/D"
 
-# Para a exibição no título, usamos somente dia e mês
-data_base_str = data_base.strftime("%d/%m")
+# Subtítulo com dia/mês sem o ano
+st.subheader(f"Comparativo de Inscrições até ({data_base_str})")
 
-# Cria os cutoff para cada ano usando o mesmo dia e mês de data_base, mas com o ano respectivo.
+# Define o cutoff para cada ano usando o mesmo dia/mês
 cutoff_dates = {
     2023: pd.Timestamp(year=2023, month=data_base.month, day=data_base.day),
     2024: pd.Timestamp(year=2024, month=data_base.month, day=data_base.day),
-    2025: data_base  # para 2025 já temos a data completa, mas usaremos somente dia e mês na exibição
+    2025: data_base
 }
 
-# Monta uma tabela com duas colunas: "Ano" e "Data Base" (apenas dia/mês)
+# Monta os dados
 comp_rows = []
 for ano, cutoff in cutoff_dates.items():
+    qtd = df_total[(df_total['Ano'] == ano) & (df_total['Registration date'] <= cutoff)].shape[0]
     comp_rows.append({
         'Ano': ano,
-        'Data Base': cutoff.strftime("%d/%m")
+        data_base_str: qtd
     })
 
 comp_cutoff = pd.DataFrame(comp_rows)
-st.table(comp_cutoff)
+# Formata como inteiro
+comp_cutoff[data_base_str] = comp_cutoff[data_base_str].apply(format_integer)
 
+# Exibe a tabela
+st.table(comp_cutoff)
 
 
 
