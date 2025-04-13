@@ -135,27 +135,36 @@ else:
     st.error("Nenhum dado foi carregado.")
     st.stop()
 
+
 # -----------------------------------------------------
-# 2. Customização Visual (CSS)
+# 2. Customização Visual (CSS) com Data Base Dinâmica
 # -----------------------------------------------------
+if df_2025 is not None:
+    data_base = df_2025['Registration date'].max()
+    data_base_str = data_base.strftime("%d/%m/%y")
+else:
+    data_base_str = "N/D"
+
 st.markdown(
-    """
+    f"""
     <style>
-    .titulo {
-        font-size: 28px;
+    .titulo {{
+        font-size: 48px;  /* Tamanho grande para o título */
         color: #002D74;
         font-weight: bold;
-    }
-    .subtitulo {
+        text-align: center;
+    }}
+    .subtitulo {{
         font-size: 22px;
         color: #00C4B3;
         font-weight: bold;
-    }
+    }}
     </style>
     """,
     unsafe_allow_html=True
 )
-st.markdown('<p class="titulo">Dashboard de Inscrições - Paraty Brazil by UTMB</p>', unsafe_allow_html=True)
+st.markdown(f'<p class="titulo">Dashboard de Inscrições - Paraty Brazil by UTMB ({data_base_str})</p>', unsafe_allow_html=True)
+
 
 # -----------------------------------------------------
 # 3. Resumo Geral
