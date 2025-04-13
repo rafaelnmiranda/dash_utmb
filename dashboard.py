@@ -205,6 +205,33 @@ if 'Nationality' in df_total.columns:
 else:
     st.info("Coluna 'Nationality' não encontrada.")
 
+### Novo: Comparação entre Prazo Decorrido e Meta Alcançada
+# Definir datas do prazo de vendas:
+start_date = pd.Timestamp("2024-10-28")
+end_date   = pd.Timestamp("2025-08-15")
+# Definir a data base como a última data de inscrição de 2025 (ou hoje, se não houver dados)
+if df_2025 is not None:
+    data_base = df_2025['Registration date'].max()
+else:
+    data_base = pd.Timestamp.today()
+# Caso a data base ultrapasse o prazo final, considera o prazo final
+if data_base > end_date:
+    data_base = end_date
+
+total_period = (end_date - start_date).days  # Total de dias do prazo
+days_elapsed = (data_base - start_date).days  # Dias decorrido até a data base
+prazo_percent = (days_elapsed / total_period) * 100
+
+# Meta: considerando o total de inscritos de 2025 e meta total de 3500
+meta_total = 3500
+# A variável total_inscritos_2025 já foi calculada na seção de Metas (para 2025)
+meta_progress = (total_inscritos_2025 / meta_total) * 100
+
+# Exibe os dois valores lado a lado
+col_p, col_m = st.columns(2)
+col_p.metric("Prazo Decorrido (%)", format_percentage(prazo_percent))
+col_m.metric("Meta Alcançada (%)", format_percentage(meta_progress))
+
 ### 3.4 Tabela de Participação dos Atletas (baseado em Email)
 st.subheader("Participação dos Atletas por Ano (baseado em Email)")
 set_2023 = set(df_total[df_total['Ano'] == 2023]['Email'].dropna().unique())
