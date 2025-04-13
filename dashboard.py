@@ -334,37 +334,35 @@ else:
     st.info("Coluna 'Nationality' não encontrada.")
 
 ### 3.6 Comparativo de Inscrições até Data Base
-st.subheader("Comparativo de Inscrições até Data Base")
+st.subheader(f"Comparativo de Inscrições até ({data_base_str})")
 
-# Para 2025 usamos a data_base já calculada
-# Para 2023 e 2024, usamos o mesmo dia e mês da data_base, mas com o ano respectivo.
+# Para 2025, usamos a data_base já calculada; se não houver dados, define um valor default.
 if df_2025 is not None:
     data_base = df_2025['Registration date'].max()
-    # Cria os cutoff para 2023 e 2024 usando o mesmo dia e mês de data_base
-    cutoff_dates = {
-        2023: pd.Timestamp(year=2023, month=data_base.month, day=data_base.day),
-        2024: pd.Timestamp(year=2024, month=data_base.month, day=data_base.day),
-        2025: data_base  # data_base já contém dia, mês e ano para 2025
-    }
 else:
-    # Se não houver dados de 2025, use um valor padrão (ou trate o caso de forma apropriada)
-    cutoff_dates = {
-        2023: pd.Timestamp("2023-04-12"),
-        2024: pd.Timestamp("2024-04-12"),
-        2025: pd.Timestamp("2025-04-12")
-    }
+    data_base = pd.Timestamp("2025-04-12")  # valor default caso não haja dados
 
+# Para a exibição no título, usamos somente dia e mês
+data_base_str = data_base.strftime("%d/%m")
+
+# Cria os cutoff para cada ano usando o mesmo dia e mês de data_base, mas com o ano respectivo.
+cutoff_dates = {
+    2023: pd.Timestamp(year=2023, month=data_base.month, day=data_base.day),
+    2024: pd.Timestamp(year=2024, month=data_base.month, day=data_base.day),
+    2025: data_base  # para 2025 já temos a data completa, mas usaremos somente dia e mês na exibição
+}
+
+# Monta uma tabela com duas colunas: "Ano" e "Data Base" (apenas dia/mês)
 comp_rows = []
 for ano, cutoff in cutoff_dates.items():
-    count = df_total[(df_total['Ano'] == ano) & (df_total['Registration date'] <= cutoff)].shape[0]
-    cutoff_label = cutoff.strftime("%d/%m/%y")
-    comp_rows.append({'Ano': ano, f'Inscritos até {cutoff_label}': count})
-    
+    comp_rows.append({
+        'Ano': ano,
+        'Data Base': cutoff.strftime("%d/%m")
+    })
+
 comp_cutoff = pd.DataFrame(comp_rows)
-# Formata os números com separador de milhar
-col_name = comp_cutoff.columns[1]
-comp_cutoff[col_name] = comp_cutoff[col_name].apply(format_integer_thousands)
 st.table(comp_cutoff)
+
 
 
 
