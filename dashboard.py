@@ -363,10 +363,11 @@ comp_cutoff = pd.DataFrame(comp_rows)
 # Pega a quantidade de 2025 para comparação
 qtd_2025 = int(comp_cutoff.loc[comp_cutoff['Ano'] == 2025, data_base_str])
 
-# Calcula a variação em % em relação a 2025
+# Calcula a variação invertida em % em relação a 2025:
+# (qtd_2025 - qtd_ano) / qtd_2025 * 100
 comp_cutoff['Variação (%)'] = comp_cutoff.apply(
     lambda row: None if row['Ano'] == 2025
-                else (row[data_base_str] - qtd_2025) / qtd_2025 * 100,
+                else (qtd_2025 - row[data_base_str]) / qtd_2025 * 100,
     axis=1
 )
 
@@ -374,16 +375,17 @@ comp_cutoff['Variação (%)'] = comp_cutoff.apply(
 comp_cutoff_styled = comp_cutoff.style \
     .format({
         data_base_str: lambda x: format_integer_thousands(x),
-        'Variação (%)': lambda x: f"{x:+.2f}%"
+        'Variação (%)': lambda x: f"{x:+.2f}%".replace('.', ',')
     }) \
     .applymap(
         lambda v: "color: green" if isinstance(v, (int, float)) and v > 0
-                  else "color: red" if isinstance(v, (int, float)) and v < 0
+                  else "color: red"   if isinstance(v, (int, float)) and v < 0
                   else "",
         subset=['Variação (%)']
     )
 
 st.dataframe(comp_cutoff_styled, use_container_width=True)
+
 
 
 ### Gráfico de Barras: Inscrições por Semana (Últimas 10 Semanas) - 2025
