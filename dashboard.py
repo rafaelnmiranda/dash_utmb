@@ -311,7 +311,7 @@ labels = (
 # Calcula o total de emails únicos (a união dos três conjuntos)
 total_unique = len(set_2023.union(set_2024).union(set_2025))
 
-plt.figure(figsize=(8, 8))
+plt.figure(figsize=(6, 6))
 venn3([set_2023, set_2024, set_2025], set_labels=labels)
 plt.title(f"Participação dos Atletas por Ano (TOTAL: {total_unique})")
 st.pyplot(plt)
