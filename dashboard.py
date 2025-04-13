@@ -191,26 +191,15 @@ st.table(metas_df)
 
 ### 3.2 Percentual de Mulheres Inscritas (coluna Gender)
 
-st.write("Valores únicos na coluna 'Gender':", df_total['Gender'].unique())
-
-total_reg = df_total.shape[0]
-num_mulheres = df_total['Gender'].str.strip().str.upper().isin(['F', 'FEMALE']).sum()
-
-st.write("Total de inscrições:", total_reg)
-st.write("Número de mulheres (contadas):", num_mulheres)
-
-st.write("Contagem de valores na coluna 'Gender':", df_total['Gender'].str.strip().str.upper().value_counts())
-
-
-
 if 'Gender' in df_total.columns:
-    # Aqui, total_reg e num_mulheres consideram apenas os registros sem KIDS
-    total_reg = df_total.shape[0]
-    num_mulheres = df_total['Gender'].str.strip().str.upper().isin(['F', 'FEMALE']).sum()
+    df_2025_gender = df_total[df_total['Ano'] == 2025]
+    total_reg = df_2025_gender.shape[0]
+    num_mulheres = df_2025_gender['Gender'].str.strip().str.upper().isin(['F', 'FEMALE']).sum()
     perc_mulheres = (num_mulheres / total_reg) * 100
     st.metric("% de Mulheres Inscritas", format_percentage(perc_mulheres))
 else:
     st.info("Coluna 'Gender' não encontrada.")
+
 
 ### 3.3 Número de Países Diferentes (coluna Nationality)
 if 'Nationality' in df_total.columns:
