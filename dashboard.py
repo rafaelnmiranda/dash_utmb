@@ -339,9 +339,9 @@ if df_2025 is not None:
     data_base = df_2025['Registration date'].max()
     data_base_str = data_base.strftime("%d/%m")
 else:
-    data_base_str = "N/D"
+    data_base = pd.Timestamp("2025-04-12")
+    data_base_str = data_base.strftime("%d/%m")
 
-# Subtítulo com dia/mês sem o ano
 st.subheader(f"Comparativo de Inscrições até ({data_base_str})")
 
 # Define o cutoff para cada ano usando o mesmo dia/mês
@@ -351,23 +351,37 @@ cutoff_dates = {
     2025: data_base
 }
 
-# Monta os dados
+# Monta os dados básicos
 comp_rows = []
 for ano, cutoff in cutoff_dates.items():
     qtd = df_total[(df_total['Ano'] == ano) & (df_total['Registration date'] <= cutoff)].shape[0]
-    comp_rows.append({
-        'Ano': ano,
-        data_base_str: qtd
-    })
+    comp_rows.append({'Ano': ano, data_base_str: qtd})
 
 comp_cutoff = pd.DataFrame(comp_rows)
-# Formata como inteiro
-comp_cutoff[data_base_str] = comp_cutoff[data_base_str].apply(format_integer)
 
-# Exibe a tabela
-st.table(comp_cutoff)
+# Calcula a variação em relação a 2025
+qtd_2025 = int(comp_cutoff.loc[comp_cutoff['Ano'] == 2025, data_base_str])
+def calc_var(row):
+    if row['Ano'] == 2025:
+        return None
+    return (row[data_base_str] - qtd_2025) / qtd_2025 * 100
 
+comp_cutoff['Variação (%)'] = comp_cutoff.apply(calc_var, axis=1)
 
+# Formatação e estilo
+comp_cutoff_styled = comp_cutoff.style \
+    .format({
+        data_base_str: "{:,.0f}".replace(",", "."),
+        'Variação (%)': "{:+.2f}%"
+    }) \
+    .applymap(
+        lambda v: "color: green" if isinstance(v, (int, float)) and v > 0
+                  else "color: red" if isinstance(v, (int, float)) and v < 0
+                  else "",
+        subset=['Variação (%)']
+    )
+
+st.dataframe(comp_cutoff_styled, use_container_width=True)
 
 ### Gráfico de Barras: Inscrições por Semana (Últimas 10 Semanas) - 2025
 
