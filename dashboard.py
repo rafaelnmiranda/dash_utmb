@@ -203,9 +203,12 @@ else:
 
 ### 3.3 Número de Países Diferentes (coluna Nationality)
 if 'Nationality' in df_total.columns:
-    # Padroniza as nacionalidades e conta os únicos
-    num_paises = df_total['Nationality'].dropna().apply(standardize_nationality).nunique()
-    st.metric("Número de Países Diferentes", format_integer(num_paises))
+    # Filtrar, padronizar e contar frequência de cada país para 2025, por exemplo
+    df_2025_nationality = df_total[df_total['Ano'] == 2025]
+    freq = df_2025_nationality['Nationality'].dropna().str.strip().str.upper().value_counts().reset_index()
+    freq.columns = ['Nationality', 'Count']
+    st.write("Frequência das nacionalidades em 2025:")
+    st.table(freq)
 else:
     st.info("Coluna 'Nationality' não encontrada.")
 
