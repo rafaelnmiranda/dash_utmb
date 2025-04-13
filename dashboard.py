@@ -207,28 +207,27 @@ else:
 
 ### NOVO: Idade Média e Distribuição das Idades dos Atletas (2025)
 if 'Birthdate' in df_total.columns:
-    # Filtra apenas os registros de 2025
     df_2025_age = df_total[df_total['Ano'] == 2025].copy()
-    # Calcula a idade considerando que em 2025 a idade = 2025 - ano de nascimento
+    # Converte a coluna "Birthdate" para datetime
+    df_2025_age['Birthdate'] = pd.to_datetime(df_2025_age['Birthdate'], errors='coerce')
     df_2025_age['Age'] = 2025 - df_2025_age['Birthdate'].dt.year
-    # Se a idade calculada for menor que 15 (erro de cadastro), define como 40
+    # Se a idade calculada for menor que 15, define como 40
     df_2025_age.loc[df_2025_age['Age'] < 15, 'Age'] = 40
-    
-    # Calcula a idade média
+
+    # Calcula a idade média e exibe em um metric
     mean_age = df_2025_age['Age'].mean()
     st.metric("Idade Média dos Atletas (2025)", format_integer(mean_age))
     
-    # Cria um gráfico de distribuição (curva de densidade) usando o figure_factory do Plotly
+    # Cria o gráfico de distribuição de idade
     import plotly.figure_factory as ff
-    # Prepara os dados: lista de idades
     hist_data = [df_2025_age['Age'].dropna().tolist()]
     group_labels = ['Idades']
-    # Cria o distplot (exibe o histograma e a curva de densidade)
     fig_age = ff.create_distplot(hist_data, group_labels, show_hist=True, show_rug=False)
     fig_age.update_layout(title_text='Distribuição de Idade dos Atletas (2025)')
     st.plotly_chart(fig_age)
 else:
     st.info("Coluna 'Birthdate' não encontrada.")
+
 
 ### Novo: Comparação entre Prazo Decorrido e Meta Alcançada
 # Definir datas do prazo de vendas:
