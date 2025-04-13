@@ -342,16 +342,17 @@ else:
     data_base = pd.Timestamp("2025-04-12")
     data_base_str = data_base.strftime("%d/%m")
 
+# Subtítulo com dia e mês
 st.subheader(f"Comparativo de Inscrições até ({data_base_str})")
 
-# Define o cutoff para cada ano usando o mesmo dia/mês
+# Define os cutoffs para cada ano
 cutoff_dates = {
     2023: pd.Timestamp(year=2023, month=data_base.month, day=data_base.day),
     2024: pd.Timestamp(year=2024, month=data_base.month, day=data_base.day),
     2025: data_base
 }
 
-# Monta os dados básicos
+# Monta as linhas com Ano e quantidade de inscritos até o cutoff
 comp_rows = []
 for ano, cutoff in cutoff_dates.items():
     qtd = df_total[(df_total['Ano'] == ano) & (df_total['Registration date'] <= cutoff)].shape[0]
@@ -359,20 +360,21 @@ for ano, cutoff in cutoff_dates.items():
 
 comp_cutoff = pd.DataFrame(comp_rows)
 
-# Calcula a variação em relação a 2025
+# Pega a quantidade de 2025 para comparação
 qtd_2025 = int(comp_cutoff.loc[comp_cutoff['Ano'] == 2025, data_base_str])
-def calc_var(row):
-    if row['Ano'] == 2025:
-        return None
-    return (row[data_base_str] - qtd_2025) / qtd_2025 * 100
 
-comp_cutoff['Variação (%)'] = comp_cutoff.apply(calc_var, axis=1)
+# Calcula a variação em % em relação a 2025
+comp_cutoff['Variação (%)'] = comp_cutoff.apply(
+    lambda row: None if row['Ano'] == 2025
+                else (row[data_base_str] - qtd_2025) / qtd_2025 * 100,
+    axis=1
+)
 
-# Formatação e estilo
+# Estiliza o DataFrame para exibir no Streamlit
 comp_cutoff_styled = comp_cutoff.style \
     .format({
-        data_base_str: "{:,.0f}".replace(",", "."),
-        'Variação (%)': "{:+.2f}%"
+        data_base_str: lambda x: format_integer_thousands(x),
+        'Variação (%)': lambda x: f"{x:+.2f}%"
     }) \
     .applymap(
         lambda v: "color: green" if isinstance(v, (int, float)) and v > 0
@@ -382,6 +384,7 @@ comp_cutoff_styled = comp_cutoff.style \
     )
 
 st.dataframe(comp_cutoff_styled, use_container_width=True)
+
 
 ### Gráfico de Barras: Inscrições por Semana (Últimas 10 Semanas) - 2025
 
