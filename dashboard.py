@@ -333,20 +333,39 @@ if 'Nationality' in df_total.columns:
 else:
     st.info("Coluna 'Nationality' não encontrada.")
 
-### 3.6 Comparativo de Inscrições até 12/04
-st.subheader("Comparativo de Inscrições até 12/04")
-cutoff_dates = {
-    2023: pd.Timestamp("2023-04-12"),
-    2024: pd.Timestamp("2024-04-12"),
-    2025: pd.Timestamp("2025-04-12")
-}
+### 3.6 Comparativo de Inscrições até Data Base
+st.subheader("Comparativo de Inscrições até Data Base")
+
+# Para 2025 usamos a data_base já calculada
+# Para 2023 e 2024, usamos o mesmo dia e mês da data_base, mas com o ano respectivo.
+if df_2025 is not None:
+    data_base = df_2025['Registration date'].max()
+    # Cria os cutoff para 2023 e 2024 usando o mesmo dia e mês de data_base
+    cutoff_dates = {
+        2023: pd.Timestamp(year=2023, month=data_base.month, day=data_base.day),
+        2024: pd.Timestamp(year=2024, month=data_base.month, day=data_base.day),
+        2025: data_base  # data_base já contém dia, mês e ano para 2025
+    }
+else:
+    # Se não houver dados de 2025, use um valor padrão (ou trate o caso de forma apropriada)
+    cutoff_dates = {
+        2023: pd.Timestamp("2023-04-12"),
+        2024: pd.Timestamp("2024-04-12"),
+        2025: pd.Timestamp("2025-04-12")
+    }
+
 comp_rows = []
 for ano, cutoff in cutoff_dates.items():
     count = df_total[(df_total['Ano'] == ano) & (df_total['Registration date'] <= cutoff)].shape[0]
-    comp_rows.append({'Ano': ano, '12/04': count})
+    cutoff_label = cutoff.strftime("%d/%m/%y")
+    comp_rows.append({'Ano': ano, f'Inscritos até {cutoff_label}': count})
+    
 comp_cutoff = pd.DataFrame(comp_rows)
-comp_cutoff['12/04'] = comp_cutoff['12/04'].apply(format_integer_thousands)
+# Formata os números com separador de milhar
+col_name = comp_cutoff.columns[1]
+comp_cutoff[col_name] = comp_cutoff[col_name].apply(format_integer_thousands)
 st.table(comp_cutoff)
+
 
 
 ### Gráfico de Barras: Inscrições por Semana (Últimas 10 Semanas) - 2025
