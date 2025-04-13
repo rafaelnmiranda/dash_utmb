@@ -10,7 +10,6 @@ from io import BytesIO
 def format_currency(val):
     """Formata valor monetário para o formato 'R$ 3.412'."""
     try:
-        # Formata com zero casas decimais e troca a vírgula por ponto para separar os milhares
         return f"R$ {float(val):,.0f}".replace(",", ".")
     except Exception:
         return val
@@ -42,11 +41,11 @@ def load_static_data(ano, url):
     try:
         response = requests.get(url)
         if response.status_code == 200:
-            # Usando sheet_name=0 para ler a primeira planilha
+            # Usando a primeira planilha (sheet_name=0)
             df = pd.read_excel(BytesIO(response.content), sheet_name=0)
             df['Registration date'] = pd.to_datetime(df['Registration date'], errors='coerce')
             df['Ano'] = ano
-            # Conversão dos valores monetários de USD para BRL
+            # Conversão de valores (os dados de 2023/2024 estão em USD)
             if 'Registration amount' in df.columns:
                 df['Registration amount'] = pd.to_numeric(df['Registration amount'], errors='coerce') * TAXA_CAMBIO
             if 'Discounts amount' in df.columns:
@@ -60,15 +59,14 @@ def load_static_data(ano, url):
         st.error(f"Erro ao carregar dados de {ano}: {e}")
         return None
 
-# URLs dos dados estáticos (2023 e 2024) em formato RAW
+# URLs dos dados estáticos (2023 e 2024)
 url_2023 = "https://github.com/rafaelnmiranda/dash_utmb/raw/815dda1e46bf0b731212e12a365ad169dc4d4e23/UTMB%20-%202023%20-%20USD.xlsx"
 url_2024 = "https://github.com/rafaelnmiranda/dash_utmb/raw/815dda1e46bf0b731212e12a365ad169dc4d4e23/UTMB%20-%202024%20-%20USD.xlsx"
 
-# Carrega os dados de 2023 e 2024
 df_2023 = load_static_data(2023, url_2023)
 df_2024 = load_static_data(2024, url_2024)
 
-# Upload dos arquivos de 2025 (permitindo múltiplos arquivos)
+# Upload dos arquivos de 2025
 st.subheader("Carregue os arquivos de inscrições 2025 (USD e BRL)")
 uploaded_files = st.file_uploader("Selecione os arquivos de 2025", type=["xlsx"], accept_multiple_files=True)
 
@@ -84,7 +82,7 @@ if uploaded_files:
         try:
             df = pd.read_excel(file, sheet_name=0)
             df['Registration date'] = pd.to_datetime(df['Registration date'], errors='coerce')
-            df['Ano'] = 2025  # Inscrições de 2025
+            df['Ano'] = 2025
             df['Moeda'] = moeda
             if 'Registration amount' in df.columns:
                 df['Registration amount'] = pd.to_numeric(df['Registration amount'], errors='coerce')
@@ -104,24 +102,20 @@ else:
     df_2025 = None
     st.warning("Aguarde o upload dos arquivos de 2025.")
 
-# Unir os dados de 2023, 2024 e 2025
+# Unir os dados
 dataframes = []
-if df_2023 is not None:
-    dataframes.append(df_2023)
-if df_2024 is not None:
-    dataframes.append(df_2024)
-if df_2025 is not None:
-    dataframes.append(df_2025)
-
+for df in [df_2023, df_2024, df_2025]:
+    if df is not None:
+        dataframes.append(df)
 if dataframes:
     df_total = pd.concat(dataframes, ignore_index=True)
     # Remover registros da prova KIDS
     if 'Competition' in df_total.columns:
         df_total = df_total[~df_total['Competition'].str.contains("KIDS", na=False, case=False)]
     else:
-        st.error("A coluna 'Competition' não foi encontrada no dataset.")
+        st.error("A coluna 'Competition' não foi encontrada.")
 else:
-    st.error("Nenhum dado foi carregado para análise.")
+    st.error("Nenhum dado foi carregado.")
     st.stop()
 
 # -----------------------------------------------------
@@ -151,25 +145,32 @@ st.markdown('<p class="titulo">Dashboard de Inscrições - Paraty Brazil by UTMB
 # -----------------------------------------------------
 st.header("Resumo Geral")
 
-# 3.1 Tabela de Inscritos com Metas (para 2025)
+# 3.1 Metas de Inscritos por Percurso - 2025
 st.subheader("Metas de Inscritos por Percurso - 2025")
+# Padroniza os nomes das competições (fazendo uppercase e strip)
+df_2025_inscritos = df_total[df_total['Ano'] == 2025].copy()
+if 'Competition' in df_2025_inscritos.columns:
+    df_2025_inscritos['Competition'] = df_2025_inscritos['Competition'].str.upper().str.strip()
+else:
+    st.error("Coluna 'Competition' não encontrada em 2025.")
+# Defina as metas com os nomes padronizados
 metas = pd.DataFrame({
-    "Percurso": ["FUN 7km", "PTR 20", "PTR 35", "PTR 55", "UTSB 100", "Total"],
-    "Meta 2025": [900, 900, 620, 770, 310, 3500]
+    "Percurso": ["FUN 7KM", "PTR 20", "PTR 35", "PTR 55", "UTSB 100", "TOTAL"]
 })
-df_2025_inscritos = df_total[df_total['Ano'] == 2025]
+metas["Meta 2025"] = [900, 900, 620, 770, 310, 3500]
+# Agrupar os inscritos por competição (convertendo também para uppercase)
 inscritos_2025 = df_2025_inscritos['Competition'].value_counts().reset_index()
 inscritos_2025.columns = ['Percurso', 'Inscritos']
+inscritos_2025['Percurso'] = inscritos_2025['Percurso'].str.upper().str.strip()
 total_inscritos_2025 = inscritos_2025['Inscritos'].sum()
-# Adiciona linha total utilizando pd.concat
-if 'Total' not in inscritos_2025['Percurso'].values:
-    total_row = pd.DataFrame([{'Percurso': 'Total', 'Inscritos': total_inscritos_2025}])
+if 'TOTAL' not in inscritos_2025['Percurso'].values:
+    total_row = pd.DataFrame([{'Percurso': 'TOTAL', 'Inscritos': total_inscritos_2025}])
     inscritos_2025 = pd.concat([inscritos_2025, total_row], ignore_index=True)
-# Formata os valores como inteiros
-metas['Meta 2025'] = metas['Meta 2025'].apply(lambda x: format_integer(x))
-inscritos_2025['Inscritos'] = inscritos_2025['Inscritos'].apply(lambda x: format_integer(x))
+# Mesclar com as metas
 metas_df = metas.merge(inscritos_2025, on="Percurso", how="left").fillna(0)
-metas_df['% da Meta'] = ((metas_df['Inscritos'].astype(float) / metas_df['Meta 2025'].astype(float)) * 100).fillna(0).apply(lambda x: format_percentage(x))
+metas_df["Meta 2025"] = metas_df["Meta 2025"].apply(format_integer)
+metas_df["Inscritos"] = metas_df["Inscritos"].apply(format_integer)
+metas_df["% da Meta"] = ((metas_df["Inscritos"].astype(float) / metas_df["Meta 2025"].astype(float)) * 100).fillna(0).apply(format_percentage)
 st.table(metas_df)
 
 # 3.2 Percentual de Mulheres Inscritas (coluna Gender)
@@ -183,7 +184,8 @@ else:
 
 # 3.3 Número de Países Diferentes (coluna Nationality)
 if 'Nationality' in df_total.columns:
-    num_paises = df_total['Nationality'].nunique()
+    # Padroniza os nomes para evitar duplicatas por espaços ou diferenças de letra
+    num_paises = df_total['Nationality'].str.strip().str.upper().nunique()
     st.metric("Número de Países Diferentes", format_integer(num_paises))
 else:
     st.info("Coluna 'Nationality' não encontrada.")
@@ -210,21 +212,19 @@ participation = pd.DataFrame({
                    len(only_2023_2024), len(only_2023_2025),
                    len(only_2024_2025), len(all_three)]
 })
-# Adiciona linha total (soma de todas as quantidades)
 total_participation = participation['Quantidade'].sum()
 total_row = pd.DataFrame([{'Participação': 'Total', 'Quantidade': total_participation}])
 participation = pd.concat([participation, total_row], ignore_index=True)
-participation['Quantidade'] = participation['Quantidade'].apply(lambda x: format_integer(x))
+participation['Quantidade'] = participation['Quantidade'].apply(format_integer)
 st.table(participation)
 
 # 3.5 Top 10 Países Inscritos em 2025
 if 'Nationality' in df_total.columns:
     df_2025_only = df_total[df_total['Ano'] == 2025]
-    top_paises = df_2025_only['Nationality'].value_counts().head(10).reset_index()
+    top_paises = df_2025_only['Nationality'].str.strip().str.upper().value_counts().head(10).reset_index()
     top_paises.columns = ['País', 'Inscritos']
-    top_paises['Inscritos'] = top_paises['Inscritos'].apply(lambda x: format_integer(x))
+    top_paises['Inscritos'] = top_paises['Inscritos'].apply(format_integer)
     st.subheader("Top 10 Países Inscritos em 2025")
-    # Adiciona linha total
     total_top = top_paises['Inscritos'].astype(int).sum()
     total_row = pd.DataFrame([{'País': 'Total', 'Inscritos': format_integer(total_top)}])
     top_paises = pd.concat([top_paises, total_row], ignore_index=True)
@@ -232,27 +232,36 @@ if 'Nationality' in df_total.columns:
 else:
     st.info("Coluna 'Nationality' não encontrada.")
 
-# 3.6 Comparativo de Inscrições até Data Base
-if df_2025 is not None and 'Registration date' in df_2025.columns:
-    data_base = df_2025['Registration date'].max()
-else:
-    data_base = pd.Timestamp.today()
-df_comp = df_total[df_total['Registration date'] <= data_base]
-inscritos_comp = df_comp.groupby('Ano').size().reset_index(name=f'Inscritos até {data_base.strftime("%d/%m/%Y")}')
-inscritos_comp[f'Inscritos até {data_base.strftime("%d/%m/%Y")}'] = inscritos_comp[f'Inscritos até {data_base.strftime("%d/%m/%Y")}'].apply(lambda x: format_integer(x))
-st.subheader(f"Comparativo de Inscrições até {data_base.strftime('%d/%m/%Y')}")
-# Adiciona linha total para o comparativo
-total_comp = inscritos_comp[f'Inscritos até {data_base.strftime("%d/%m/%Y")}'].astype(int).sum()
-total_row = pd.DataFrame([{ 'Ano': 'Total', f'Inscritos até {data_base.strftime("%d/%m/%Y")}': format_integer(total_comp) }])
-inscritos_comp = pd.concat([inscritos_comp, total_row], ignore_index=True)
-st.table(inscritos_comp)
+# 3.6 Comparativo de Inscrições até 12/04 de cada ano
+st.subheader("Comparativo de Inscrições até 12/04 de cada Ano")
+cutoff_dates = {2023: pd.Timestamp("2023-04-12"),
+                2024: pd.Timestamp("2024-04-12"),
+                2025: pd.Timestamp("2025-04-12")}
+comp_rows = []
+for ano, cutoff in cutoff_dates.items():
+    count = df_total[(df_total['Ano'] == ano) & (df_total['Registration date'] <= cutoff)].shape[0]
+    comp_rows.append({'Ano': ano, f'Inscritos até {cutoff.strftime("%d/%m/%Y")}': count})
+comp_cutoff = pd.DataFrame(comp_rows)
+total_cutoff = comp_cutoff.iloc[:, 1].sum()
+total_row = pd.DataFrame([{ 'Ano': 'Total', f'Inscritos até {cutoff_dates[2025].strftime("%d/%m/%Y")}': format_integer(total_cutoff) }])
+comp_cutoff = pd.concat([comp_cutoff, total_row], ignore_index=True)
+st.table(comp_cutoff)
 
-# 3.7 Média Móvel e Projeção para 15 de Agosto (para 2025)
+# 3.7 Gráfico de Inscrições Acumuladas - 2025 (somente 2025)
+st.subheader("Inscrições Acumuladas - 2025")
+df_2025_acc = df_total[df_total['Ano'] == 2025].copy()
+df_2025_acc['Date'] = pd.to_datetime(df_2025_acc['Registration date'].dt.date)
+df_2025_acc = df_2025_acc.sort_values('Date')
+acc_daily = df_2025_acc.groupby('Date').size().reset_index(name='Inscritos')
+acc_daily['Acumulado'] = acc_daily['Inscritos'].cumsum()
+fig_acc = px.line(acc_daily, x='Date', y='Acumulado', title="Inscrições Acumuladas em 2025")
+st.plotly_chart(fig_acc)
+
+# 3.8 Média Móvel e Projeção para 15 de Agosto (2025)
 if df_2025 is not None and 'Registration date' in df_2025.columns:
     df_2025_daily = df_2025.copy()
-    df_2025_daily['Date'] = df_2025_daily['Registration date'].dt.date
+    df_2025_daily['Date'] = pd.to_datetime(df_2025_daily['Registration date'].dt.date)
     daily_counts = df_2025_daily.groupby('Date').size().reset_index(name='Inscritos')
-    daily_counts['Date'] = pd.to_datetime(daily_counts['Date'])
     daily_counts = daily_counts.sort_values('Date')
     daily_counts.set_index('Date', inplace=True)
     daily_counts['MM_7'] = daily_counts['Inscritos'].rolling(window=7).mean()
@@ -281,35 +290,36 @@ else:
     st.info("Dados de 2025 não disponíveis para cálculo de média móvel e projeção.")
 
 # -----------------------------------------------------
-# 4. Filtro por Ano para Análises Detalhadas
+# 4. Filtro de Ano para Métricas Financeiras
 # -----------------------------------------------------
-anos_disponiveis = sorted(df_total['Ano'].dropna().unique())
-opcao_ano = st.sidebar.multiselect("Selecione o(s) ano(s) para análise detalhada:", anos_disponiveis, default=anos_disponiveis)
-df_filtrado = df_total[df_total['Ano'].isin(opcao_ano)]
-if 'Registration amount' in df_filtrado.columns and 'Discounts amount' in df_filtrado.columns:
-    df_filtrado['Total Amount'] = df_filtrado['Registration amount'] + df_filtrado['Discounts amount']
+st.sidebar.header("Filtro para Métricas Financeiras")
+anos_fin = sorted(df_total['Ano'].dropna().unique())
+opcao_ano_fin = st.sidebar.multiselect("Selecione o(s) ano(s):", anos_fin, default=anos_fin)
+df_financial = df_total[df_total['Ano'].isin(opcao_ano_fin)].copy()
+
+# Cálculo das métricas financeiras
+if 'Registration amount' in df_financial.columns and 'Discounts amount' in df_financial.columns:
+    receita_bruta = df_financial['Registration amount'].sum() + df_financial['Discounts amount'].sum()
+    receita_liquida = df_financial['Registration amount'].sum()
+    total_inscritos_fin = df_financial['Email'].nunique()  # atletas únicos
 else:
     st.error("As colunas financeiras não foram encontradas.")
     st.stop()
 
-# Métricas principais em 3 colunas
 col1, col2, col3 = st.columns(3)
-receita_bruta = df_filtrado['Total Amount'].sum()
-receita_liquida = df_filtrado['Registration amount'].sum()
-total_inscritos = df_filtrado.shape[0]
 col1.metric("Receita Bruta (R$)", format_currency(receita_bruta))
 col2.metric("Receita Líquida (R$)", format_currency(receita_liquida))
-col3.metric("Total Inscritos", format_integer(total_inscritos))
+col3.metric("Total Inscritos Únicos", format_integer(total_inscritos_fin))
 
 # -----------------------------------------------------
-# 5. Layout com Abas para Análises Detalhadas
+# 5. Layout com Abas para Análises Detalhadas (demais análises)
 # -----------------------------------------------------
 tab1, tab2, tab3 = st.tabs(["Inscritos", "Análises Financeiras", "Comparativo Entre Anos"])
 
 with tab1:
     st.subheader("Dados de Inscritos por Competição")
-    if 'Competition' in df_filtrado.columns:
-        inscritos = df_filtrado['Competition'].value_counts().reset_index()
+    if 'Competition' in df_financial.columns:
+        inscritos = df_financial['Competition'].value_counts().reset_index()
         inscritos.columns = ['Percurso', 'Inscritos']
         total_insc = inscritos['Inscritos'].astype(int).sum()
         total_row = pd.DataFrame([{'Percurso': 'Total', 'Inscritos': format_integer(total_insc)}])
@@ -320,10 +330,10 @@ with tab1:
 
 with tab2:
     st.subheader("Análises Financeiras")
-    if 'Discount code' in df_filtrado.columns:
-        coupon_groups = df_filtrado['Discount code'].fillna('OUTROS').str.upper().str.extract(r'(PTY25|TG25|TP25|GP25)', expand=False)
-        df_filtrado['Coupon Group'] = coupon_groups.fillna('OUTROS')
-        coupon_summary = df_filtrado.groupby('Coupon Group').agg(
+    if 'Discount code' in df_financial.columns:
+        coupon_groups = df_financial['Discount code'].fillna('OUTROS').str.upper().str.extract(r'(PTY25|TG25|TP25|GP25)', expand=False)
+        df_financial['Coupon Group'] = coupon_groups.fillna('OUTROS')
+        coupon_summary = df_financial.groupby('Coupon Group').agg(
             Total_Discounts=pd.NamedAgg(column='Discounts amount', aggfunc='sum'),
             Quantidade_Descontos=pd.NamedAgg(column='Discounts amount', aggfunc=lambda x: (x > 0).sum())
         ).reset_index()
@@ -336,9 +346,10 @@ with tab2:
     else:
         st.info("Não há informações de cupom de desconto na base.")
     
-    revenue_by_competition = df_filtrado.groupby('Competition').agg(
+    revenue_by_competition = df_financial.groupby('Competition').agg(
         Total_Inscritos=pd.NamedAgg(column='Competition', aggfunc='size'),
-        Receita_Bruta=pd.NamedAgg(column='Total Amount', aggfunc='sum'),
+        Receita_Bruta=pd.NamedAgg(column='Registration amount', aggfunc='sum') +
+                        pd.NamedAgg(column='Discounts amount', aggfunc='sum'),
         Receita_Líquida=pd.NamedAgg(column='Registration amount', aggfunc='sum'),
         Total_Descontos=pd.NamedAgg(column='Discounts amount', aggfunc='sum')
     ).reset_index()
@@ -362,18 +373,10 @@ with tab2:
 
 with tab3:
     st.subheader("Comparativo de Receita por Competição (por Ano)")
-    comparativo = df_filtrado.groupby(['Ano', 'Competition'])['Registration amount'].sum().reset_index()
+    comparativo = df_financial.groupby(['Ano', 'Competition'])['Registration amount'].sum().reset_index()
     comparativo['Registration amount'] = comparativo['Registration amount'].apply(format_currency)
     fig_comparativo = px.bar(comparativo, x='Competition', y='Registration amount', color='Ano',
                               barmode='group', title="Comparativo de Receita por Competição (R$)")
     st.plotly_chart(fig_comparativo)
-
-if 'Registration date' in df_filtrado.columns:
-    df_filtrado['Mês'] = df_filtrado['Registration date'].dt.month
-    inscricoes_mensais = df_filtrado.groupby(['Ano', 'Mês']).size().reset_index(name='Inscrições')
-    inscricoes_mensais['Inscrições'] = inscricoes_mensais['Inscrições'].apply(format_integer)
-    fig_temporal = px.line(inscricoes_mensais, x='Mês', y='Inscrições', color='Ano',
-                           title="Inscrições Mensais por Ano")
-    st.plotly_chart(fig_temporal)
 
 st.markdown("***Fim do Dashboard***")
