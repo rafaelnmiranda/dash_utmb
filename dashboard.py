@@ -203,15 +203,19 @@ else:
 
 ### 3.3 Número de Países Diferentes (coluna Nationality)
 if 'Nationality' in df_total.columns:
-    # Filtrar, padronizar e contar frequência de cada país para 2025, por exemplo
-    df_2025_nationality = df_total[df_total['Ano'] == 2025]
-    freq = df_2025_nationality['Nationality'].dropna().str.strip().str.upper().value_counts().reset_index()
-    freq.columns = ['Nationality', 'Count']
-    st.write("Frequência das nacionalidades em 2025:")
-    st.table(freq)
+    # Filtra somente os registros de 2025
+    df_2025 = df_total[df_total['Ano'] == 2025].copy()
+    # Padroniza os valores de Nationality (removendo espaços e convertendo para maiúsculas)
+    df_2025['Nationality_std'] = df_2025['Nationality'].dropna().apply(lambda x: x.strip().upper())
+    # Conta os valores únicos
+    num_paises_2025 = df_2025['Nationality_std'].nunique()
+    st.metric("Número de Países Diferentes (2025)", str(num_paises_2025))
+    # Opcional: visualizar a tabela com as frequências
+    freq_std = df_2025['Nationality_std'].value_counts().reset_index()
+    freq_std.columns = ['Nationality', 'Count']
+    st.table(freq_std)
 else:
-    st.info("Coluna 'Nationality' não encontrada.")
-
+    st.write("Coluna 'Nationality' não encontrada.")
 ### 3.4 Tabela de Participação dos Atletas (baseado em Email)
 st.subheader("Participação dos Atletas por Ano (baseado em Email)")
 set_2023 = set(df_total[df_total['Ano'] == 2023]['Email'].dropna().unique())
