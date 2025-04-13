@@ -283,13 +283,13 @@ st.table(participation)
 
 
 # --- Diagrama de Venn para Participação dos Atletas ---
-#from matplotlib_venn import venn3
-#import matplotlib.pyplot as plt
+from matplotlib_venn import venn3
+import matplotlib.pyplot as plt
 
-#plt.figure(figsize=(8, 8))
-#venn3([set_2023, set_2024, set_2025], set_labels=('2023', '2024', '2025'))
-#plt.title("Participação dos Atletas por Ano (Diagrama de Venn)")
-#st.pyplot(plt)
+plt.figure(figsize=(8, 8))
+venn3([set_2023, set_2024, set_2025], set_labels=('2023', '2024', '2025'))
+plt.title("Participação dos Atletas por Ano (Diagrama de Venn)")
+st.pyplot(plt)
 
 
 ### 3.5 Top 10 Países Inscritos em 2025
