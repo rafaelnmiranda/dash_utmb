@@ -190,6 +190,19 @@ metas_df["% da Meta"] = ((metas_df["Inscritos"].astype(float) / metas_df["Meta 2
 st.table(metas_df)
 
 ### 3.2 Percentual de Mulheres Inscritas (coluna Gender)
+
+st.write("Valores únicos na coluna 'Gender':", df_total['Gender'].unique())
+
+total_reg = df_total.shape[0]
+num_mulheres = df_total['Gender'].str.strip().str.upper().isin(['F', 'FEMALE']).sum()
+
+st.write("Total de inscrições:", total_reg)
+st.write("Número de mulheres (contadas):", num_mulheres)
+
+st.write("Contagem de valores na coluna 'Gender':", df_total['Gender'].str.strip().str.upper().value_counts())
+
+
+
 if 'Gender' in df_total.columns:
     # Aqui, total_reg e num_mulheres consideram apenas os registros sem KIDS
     total_reg = df_total.shape[0]
