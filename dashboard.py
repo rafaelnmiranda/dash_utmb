@@ -55,6 +55,31 @@ def standardize_nationality(value):
 # ---------------------------
 TAXA_CAMBIO = 5.5  # 1 USD = R$ 5,5
 
+# ---------------------------
+# Carrega cidades IBGE
+# ---------------------------
+@st.cache_data(show_spinner=False)
+def load_ibge_municipios():
+    import unicodedata, re, difflib  # agora são locais
+    IBGE_URL = (
+        "https://raw.githubusercontent.com/"
+        "rafaelnmiranda/dash_utmb/"
+        "de2e7125c2a3c08c7c41be14c43e528b43c2ea58/"
+        "municipios_IBGE.xlsx"
+    )
+    # Requisição com timeout para não travar indefinidamente
+    response = requests.get(IBGE_URL, timeout=10)
+    response.raise_for_status()
+    df = pd.read_excel(BytesIO(response.content), engine='openpyxl')
+
+    # Função de normalização local
+    def norm_text(text):
+        t = unicodedata.normalize('NFKD', str(text))
+        t = ''.join(c for c in t if not unicodedata.combining(c))
+        return re.sub(r'[^a-z0-9\s]', '', t.lower().strip())
+
+    df['City_norm'] = df['City'].apply(norm_text)
+    return df, norm_text
 
 
 # -----------------------------------------------------
