@@ -323,29 +323,32 @@ col_m.metric("Meta Alcançada (%)", format_percentage(meta_progress))
 
 
 ### CIDADES
-# --- Análise de Cidades Brasileiras ---
-# Filtrar apenas inscrições do Brasil
-df_br = df_total[df_total['Country'].str.lower() == 'brazil'].copy()
+# --- Análise de Cidades Brasileiras (2025) ---
+# 1. Filtrar apenas inscrições do Brasil no ano de 2025
+df_br = df_total[
+    (df_total['Country'].str.lower() == 'brazil') &
+    (df_total['Ano'] == 2025)
+].copy()
 
-# Título
+# 2. Cabeçalho
 st.subheader("Cidades Brasileiras")
 
-# Métrica: total de municípios distintos
+# 3. Métrica: total de municípios distintos em 2025
 num_cidades = df_br['City'].nunique()
-st.metric("Total de municípios distintos", num_cidades)
+st.metric("Total de municípios distintos (2025)", num_cidades)
 
-# Top 10 cidades + percentual
+# 4. Top 10 cidades + percentual em 2025
 total_br = len(df_br)
 counts = df_br['City'].value_counts()
 top10 = counts.head(10)
 
-# Monta o DataFrame corretamente
+# 4.1 Monta o DataFrame
 top_cidades = pd.DataFrame({
     'Cidade': top10.index,
     'Inscritos': top10.values
 })
 
-# Calcula o % do total
+# 4.2 Calcula % do total
 if total_br > 0:
     top_cidades['% do Total'] = (
         top_cidades['Inscritos'] / total_br * 100
@@ -353,8 +356,9 @@ if total_br > 0:
 else:
     top_cidades['% do Total'] = "0.00%"
 
-# Exibe a tabela
+# 5. Exibir tabela
 st.table(top_cidades)
+
 
 
 
