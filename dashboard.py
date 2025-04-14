@@ -481,23 +481,25 @@ fig_weekly = px.bar(
 )
 fig_weekly.update_traces(textposition='outside')
 
-# linha de média vermelha com legenda
+
+
+# linha de média contínua em laranja com legenda
 fig_weekly.add_scatter(
     x=weekly_counts['Semana'],
     y=[media_inscritos] * len(weekly_counts),
     mode='lines',
     name=f'Média: {media_inscritos:.1f}',
-    line=dict(color='red', dash='dash')
+    line=dict(color='orange')  # cor laranja, estilo contínuo (padrão)
 )
 
-# anotação do valor da média no fim da linha
+# anotação do valor da média em laranja
 fig_weekly.add_annotation(
     x=weekly_counts['Semana'].iloc[-1],
     y=media_inscritos,
     text=f"{media_inscritos:.1f}",
     showarrow=False,
     yshift=10,
-    font=dict(color='red')
+    font=dict(color='orange')  # rótulo em laranja
 )
 
 st.plotly_chart(fig_weekly)
