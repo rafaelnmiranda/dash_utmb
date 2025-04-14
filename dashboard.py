@@ -440,6 +440,69 @@ fig_weekly.add_annotation(
 
 st.plotly_chart(fig_weekly)
 
+### Gráfico teste
+
+# --- seu código existente para filtrar 2025 e converter data ---
+df_2025_acc = df_total[df_total['Ano'] == 2025].copy()
+df_2025_acc['Date'] = pd.to_datetime(df_2025_acc['Registration date'].dt.date)
+df_2025_acc = df_2025_acc.sort_values('Date')
+
+# Data base
+last_date = df_2025_acc['Date'].max()
+
+# --- cria os 10 intervalos de 7 dias personalizados ---
+intervals = []
+for i in range(10):
+    end = last_date - pd.Timedelta(days=1) - pd.Timedelta(days=7 * i)
+    start = end - pd.Timedelta(days=6)
+    intervals.append((start, end))
+
+# --- conta inscrições em cada intervalo e formata label ---
+data = []
+for start, end in intervals:
+    cnt = df_2025_acc[(df_2025_acc['Date'] >= start) & (df_2025_acc['Date'] <= end)].shape[0]
+    label = f"{start.strftime('%d/%m')} – {end.strftime('%d/%m')}"
+    data.append({'Semana': label, 'Inscritos': cnt})
+
+# inverter para que a semana mais antiga venha primeiro no eixo X
+weekly_counts = pd.DataFrame(data)[::-1].reset_index(drop=True)
+
+# --- cálculo da média ---
+media_inscritos = weekly_counts['Inscritos'].mean()
+
+# --- plot com Plotly ---
+fig_weekly = px.bar(
+    weekly_counts,
+    x='Semana',
+    y='Inscritos',
+    text='Inscritos',
+    title="Inscrições Vendidas por Semana (Últimas 10 Semanas) - 2025",
+    labels={"Semana": "Período", "Inscritos": "Quantidade de Inscrições"}
+)
+fig_weekly.update_traces(textposition='outside')
+
+# linha de média vermelha com legenda
+fig_weekly.add_scatter(
+    x=weekly_counts['Semana'],
+    y=[media_inscritos] * len(weekly_counts),
+    mode='lines',
+    name=f'Média: {media_inscritos:.1f}',
+    line=dict(color='red', dash='dash')
+)
+
+# anotação do valor da média no fim da linha
+fig_weekly.add_annotation(
+    x=weekly_counts['Semana'].iloc[-1],
+    y=media_inscritos,
+    text=f"{media_inscritos:.1f}",
+    showarrow=False,
+    yshift=10,
+    font=dict(color='red')
+)
+
+st.plotly_chart(fig_weekly)
+
+
 
 ### Gráfico de Barras: Média de Inscrições por Dia da Semana (2025)
 
