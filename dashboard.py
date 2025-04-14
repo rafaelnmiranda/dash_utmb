@@ -644,19 +644,16 @@ with tab2:
         )
         df_financial['Coupon Group'] = coupon_groups.fillna('OUTROS')
 
-        # Agrupa por cupom
         coupon_summary = df_financial.groupby('Coupon Group').agg(
             Total_Discounts=('Discounts amount', 'sum'),
             Quantidade_Descontos=('Discounts amount', lambda x: (x > 0).sum())
         ).reset_index()
 
-        # Formata valores
         coupon_summary['Total_Discounts'] = coupon_summary['Total_Discounts']\
             .apply(lambda x: f"{int(round(x)):,}".replace(',', '.'))
         coupon_summary['Quantidade_Descontos'] = coupon_summary['Quantidade_Descontos']\
             .apply(format_integer)
 
-        # Totalizador geral de valores e quantidades
         total_valores = df_financial['Discounts amount'].sum()
         total_qtd    = (df_financial['Discounts amount'] > 0).sum()
         total_row = pd.DataFrame([{
@@ -667,11 +664,10 @@ with tab2:
 
         coupon_summary = pd.concat([coupon_summary, total_row], ignore_index=True)
         st.table(coupon_summary)
-
     else:
         st.info("Não há informações de cupom de desconto na base.")
 
-    # --- Tabela 2: receitas por competição sem colunas brutas originais ---
+    # --- Tabela 2: receitas por competição com totalizador ---
     grp = df_financial.groupby('Competition').agg({
         'Registration amount': 'sum',
         'Discounts amount': 'sum'
@@ -681,14 +677,24 @@ with tab2:
     grp['Receita_Líquida'] = grp['Registration amount']
     grp['Total_Descontos'] = grp['Discounts amount']
 
-    revenue_by_competition = grp.reset_index()
-
-    # Remove colunas brutas
-    revenue_by_competition = revenue_by_competition.drop(
+    revenue_by_competition = grp.reset_index().drop(
         columns=['Registration amount', 'Discounts amount']
     )
 
-    # Formata colunas
+    # Totalizador da segunda tabela
+    total_row2 = pd.DataFrame([{
+        'Competition': 'Total',
+        'Total Inscritos': revenue_by_competition['Total Inscritos'].sum(),
+        'Receita_Bruta':   revenue_by_competition['Receita_Bruta'].sum(),
+        'Receita_Líquida': revenue_by_competition['Receita_Líquida'].sum(),
+        'Total_Descontos': revenue_by_competition['Total_Descontos'].sum()
+    }])
+    revenue_by_competition = pd.concat(
+        [revenue_by_competition, total_row2],
+        ignore_index=True
+    )
+
+    # Formatação final
     revenue_by_competition['Total Inscritos'] = revenue_by_competition['Total Inscritos']\
         .apply(format_integer)
     for col in ['Receita_Bruta', 'Receita_Líquida', 'Total_Descontos']:
@@ -696,6 +702,7 @@ with tab2:
             .apply(lambda x: f"{int(round(x)):,}".replace(',', '.'))
 
     st.table(revenue_by_competition)
+
 
 
 with tab3:
