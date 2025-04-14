@@ -4,7 +4,46 @@ import plotly.express as px
 import requests
 from io import BytesIO
 
+# ─── Correção de City usando lista IBGE ───
+@st.cache_data(show_spinner=False)
+def load_ibge_municipios():
+    import unicodedata, re, difflib
+    IBGE_URL = (
+        "https://raw.githubusercontent.com/"
+        "rafaelnmiranda/dash_utmb/"
+        "de2e7125c2a3c08c7c41be14c43e528b43c2ea58/"
+        "municipios_IBGE.xlsx"
+    )
+    # Busca com timeout e levanta exceção em falha
+    resp = requests.get(IBGE_URL, timeout=10)
+    resp.raise_for_status()
+    df = pd.read_excel(BytesIO(resp.content), engine='openpyxl')
+    def norm_text(text):
+        t = unicodedata.normalize('NFKD', str(text))
+        t = ''.join(c for c in t if not unicodedata.combining(c))
+        return re.sub(r'[^a-z0-9\s]', '', t.lower().strip())
+    df['City_norm'] = df['City'].apply(norm_text)
+    return df, norm_text
 
+# Carrega IBGE e normalizador
+with st.spinner("🔄 Carregando municípios do IBGE..."):
+    try:
+        ibge_df, norm_text = load_ibge_municipios()
+        st.success("✅ IBGE carregado")
+    except Exception as e:
+        st.error(f"Erro ao carregar IBGE: {e}")
+        st.stop()
+city_choices = ibge_df['City_norm'].tolist()
+
+def correct_city(city, cutoff=0.8):
+    """Corrige um nome de cidade via fuzzy matching; retorna original se sem match."""
+    import difflib
+    norm = norm_text(city)
+    matches = difflib.get_close_matches(norm, city_choices, n=1, cutoff=cutoff)
+    if matches:
+        return ibge_df.loc[ibge_df['City_norm'] == matches[0], 'City'].iat[0]
+    return city
+# ─────────────────────────────────────────────
 
 # ---------------------------
 # Funções Auxiliares de Formatação
@@ -55,31 +94,6 @@ def standardize_nationality(value):
 # ---------------------------
 TAXA_CAMBIO = 5.5  # 1 USD = R$ 5,5
 
-# ---------------------------
-# Carrega cidades IBGE
-# ---------------------------
-@st.cache_data(show_spinner=False)
-def load_ibge_municipios():
-    import unicodedata, re, difflib  # agora são locais
-    IBGE_URL = (
-        "https://raw.githubusercontent.com/"
-        "rafaelnmiranda/dash_utmb/"
-        "de2e7125c2a3c08c7c41be14c43e528b43c2ea58/"
-        "municipios_IBGE.xlsx"
-    )
-    # Requisição com timeout para não travar indefinidamente
-    response = requests.get(IBGE_URL, timeout=10)
-    response.raise_for_status()
-    df = pd.read_excel(BytesIO(response.content), engine='openpyxl')
-
-    # Função de normalização local
-    def norm_text(text):
-        t = unicodedata.normalize('NFKD', str(text))
-        t = ''.join(c for c in t if not unicodedata.combining(c))
-        return re.sub(r'[^a-z0-9\s]', '', t.lower().strip())
-
-    df['City_norm'] = df['City'].apply(norm_text)
-    return df, norm_text
 
 
 # -----------------------------------------------------
