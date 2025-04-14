@@ -632,37 +632,71 @@ with tab1:
         st.error("Coluna 'Competition' ausente.")
 
 with tab2:
-    st.subheader("Análises Financeiras")
+    st.subheader("Análises Financeiras (R$)")
+
+    # --- Tabela 1: cupom de desconto com totalizador de valores ---
     if 'Discount code' in df_financial.columns:
-        coupon_groups = df_financial['Discount code'].fillna('OUTROS').str.upper().str.extract(r'(PTY25|TG25|TP25|GP25)', expand=False)
+        coupon_groups = (
+            df_financial['Discount code']
+            .fillna('OUTROS')
+            .str.upper()
+            .str.extract(r'(PTY25|TG25|TP25|GP25)', expand=False)
+        )
         df_financial['Coupon Group'] = coupon_groups.fillna('OUTROS')
+
+        # Agrupa por cupom
         coupon_summary = df_financial.groupby('Coupon Group').agg(
             Total_Discounts=('Discounts amount', 'sum'),
             Quantidade_Descontos=('Discounts amount', lambda x: (x > 0).sum())
         ).reset_index()
-        coupon_summary['Total_Discounts'] = coupon_summary['Total_Discounts'].apply(format_currency)
-        coupon_summary['Quantidade_Descontos'] = coupon_summary['Quantidade_Descontos'].apply(format_integer)
-        total_desc = coupon_summary['Quantidade_Descontos'].astype(int).sum()
-        total_row = pd.DataFrame([{'Coupon Group': 'Total', 'Total_Discounts': '', 'Quantidade_Descontos': format_integer(total_desc)}])
+
+        # Formata valores
+        coupon_summary['Total_Discounts'] = coupon_summary['Total_Discounts']\
+            .apply(lambda x: f"{int(round(x)):,}".replace(',', '.'))
+        coupon_summary['Quantidade_Descontos'] = coupon_summary['Quantidade_Descontos']\
+            .apply(format_integer)
+
+        # Totalizador geral de valores e quantidades
+        total_valores = df_financial['Discounts amount'].sum()
+        total_qtd    = (df_financial['Discounts amount'] > 0).sum()
+        total_row = pd.DataFrame([{
+            'Coupon Group': 'Total',
+            'Total_Discounts': f"{int(round(total_valores)):,}".replace(',', '.'),
+            'Quantidade_Descontos': format_integer(total_qtd)
+        }])
+
         coupon_summary = pd.concat([coupon_summary, total_row], ignore_index=True)
         st.table(coupon_summary)
+
     else:
         st.info("Não há informações de cupom de desconto na base.")
-    
+
+    # --- Tabela 2: receitas por competição sem colunas brutas originais ---
     grp = df_financial.groupby('Competition').agg({
         'Registration amount': 'sum',
         'Discounts amount': 'sum'
     })
     grp['Total Inscritos'] = df_financial.groupby('Competition').size()
-    grp['Receita_Bruta'] = grp['Registration amount'] + grp['Discounts amount']
+    grp['Receita_Bruta']   = grp['Registration amount'] + grp['Discounts amount']
     grp['Receita_Líquida'] = grp['Registration amount']
     grp['Total_Descontos'] = grp['Discounts amount']
+
     revenue_by_competition = grp.reset_index()
-    revenue_by_competition['Total Inscritos'] = revenue_by_competition['Total Inscritos'].apply(format_integer)
-    revenue_by_competition['Receita_Bruta'] = revenue_by_competition['Receita_Bruta'].apply(format_currency)
-    revenue_by_competition['Receita_Líquida'] = revenue_by_competition['Receita_Líquida'].apply(format_currency)
-    revenue_by_competition['Total_Descontos'] = revenue_by_competition['Total_Descontos'].apply(format_currency)
+
+    # Remove colunas brutas
+    revenue_by_competition = revenue_by_competition.drop(
+        columns=['Registration amount', 'Discounts amount']
+    )
+
+    # Formata colunas
+    revenue_by_competition['Total Inscritos'] = revenue_by_competition['Total Inscritos']\
+        .apply(format_integer)
+    for col in ['Receita_Bruta', 'Receita_Líquida', 'Total_Descontos']:
+        revenue_by_competition[col] = revenue_by_competition[col]\
+            .apply(lambda x: f"{int(round(x)):,}".replace(',', '.'))
+
     st.table(revenue_by_competition)
+
 
 with tab3:
     st.subheader("Comparativo de Receita por Competição (por Ano)")
