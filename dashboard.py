@@ -323,73 +323,46 @@ col_m.metric("Meta Alcançada (%)", format_percentage(meta_progress))
 
 
 ### CIDADES
-# --- Filtrar apenas Brasil ---
+# --- Análise de Cidades Brasileiras ---
+# 1. Filtrar apenas inscrições do Brasil
 df_br = df_total[df_total['Country'].str.lower() == 'brazil'].copy()
 
-# 1) CIDADES BRASILEIRAS -----------------------------------
+# 2. Cabeçalho
 st.subheader("Cidades Brasileiras")
 
-# 1.1) Quantidade de municípios diferentes
+# 3. Métrica: total de municípios distintos
 num_cidades = df_br['City'].nunique()
 st.metric("Total de municípios distintos", num_cidades)
 
-# 1.2) Top 10 cidades + %
+# 4. Top 10 cidades + percentual
 total_br = len(df_br)
+
 top_cidades = (
     df_br['City']
     .value_counts()
     .head(10)
     .reset_index()
-    .rename(columns={'index':'Cidade', 'City':'Inscritos'})
+    .rename(columns={'index': 'Cidade', 'City': 'Inscritos'})
 )
-top_cidades['% do Total'] = (
-    top_cidades['Inscritos'] / total_br * 100
-).map(lambda x: f"{x:.2f}%")
+
+# 4.1 Garantir que 'Inscritos' seja inteiro
+top_cidades['Inscritos'] = (
+    pd.to_numeric(top_cidades['Inscritos'], errors='coerce')
+      .fillna(0)
+      .astype(int)
+)
+
+# 4.2 Calcular % do total com segurança
+if total_br > 0:
+    top_cidades['% do Total'] = (
+        top_cidades['Inscritos'] / total_br * 100
+    ).map(lambda x: f"{x:.2f}%")
+else:
+    top_cidades['% do Total'] = "0.00%"
+
+# 5. Exibir tabela
 st.table(top_cidades)
 
-
-# 2) INSCRITOS POR ESTADO (UF) ----------------------------
-st.subheader("Inscritos por Estado (UF)")
-
-# Merge com IBGE para puxar a coluna UF
-df_uf = df_br.merge(
-    ibge_df[['City','UF']],
-    on='City',
-    how='left'
-)
-
-# Contagem para todos os UFs do IBGE, preenchendo zero
-ufs = sorted(ibge_df['UF'].dropna().unique())
-uf_counts = df_uf['UF'].value_counts().reindex(ufs, fill_value=0)
-uf_df = (
-    uf_counts
-    .reset_index()
-    .rename(columns={'index':'UF','UF':'Inscritos'})
-    .sort_values('Inscritos', ascending=False)
-)
-st.table(uf_df)
-
-
-# 3) INSCRITOS POR REGIÃO ----------------------------------
-st.subheader("Inscritos por Região (IBGE)")
-
-# Merge com IBGE para puxar a coluna Região
-df_reg = df_br.merge(
-    ibge_df[['City','Região']],
-    on='City',
-    how='left'
-)
-
-# Contagem para todas as Regiões do IBGE, preenchendo zero
-regs = ibge_df['Região'].dropna().unique()
-reg_counts = df_reg['Região'].value_counts().reindex(regs, fill_value=0)
-reg_df = (
-    reg_counts
-    .reset_index()
-    .rename(columns={'index':'Região','Região':'Inscritos'})
-    .sort_values('Inscritos', ascending=False)
-)
-st.table(reg_df)
 
 
 
