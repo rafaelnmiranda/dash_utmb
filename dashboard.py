@@ -391,33 +391,52 @@ st.dataframe(comp_cutoff_styled, use_container_width=True)
 ### Gráfico de Barras: Inscrições por Semana (Últimas 10 Semanas) - 2025
 
 df_2025_acc = df_total[df_total['Ano'] == 2025].copy()
-# Converte para data (sem o componente de hora)
 df_2025_acc['Date'] = pd.to_datetime(df_2025_acc['Registration date'].dt.date)
 df_2025_acc = df_2025_acc.sort_values('Date')
 
-# Define a data base como a mais recente
 last_date = df_2025_acc['Date'].max()
-# Obtém a data de início das últimas 10 semanas
 start_date = last_date - pd.Timedelta(weeks=10)
-
-# Filtra as inscrições dentro dessas últimas 10 semanas
 df_last_10 = df_2025_acc[df_2025_acc['Date'] >= start_date]
 
-# Agrupa as inscrições por semana (freq='W')
-weekly_counts = df_last_10.groupby(pd.Grouper(key='Date', freq='W')).size().reset_index(name='Inscritos')
+weekly_counts = (
+    df_last_10
+    .groupby(pd.Grouper(key='Date', freq='W'))
+    .size()
+    .reset_index(name='Inscritos')
+)
 
-# Cria o gráfico de barras com Plotly, exibindo o valor no topo de cada barra
+# --- cálculo da média ---
+media_inscritos = weekly_counts['Inscritos'].mean()
+
+# --- gráfico de barras ---
 fig_weekly = px.bar(
     weekly_counts,
     x='Date',
     y='Inscritos',
-    text='Inscritos',  # <-- Adiciona o texto com o valor de 'Inscritos' em cada barra
+    text='Inscritos',
     title="Inscrições Vendidas por Semana (Últimas 10 Semanas) - 2025",
     labels={"Date": "Semana", "Inscritos": "Quantidade de Inscrições"}
 )
-
-# Ajusta a posição do texto para ficar fora (acima) das barras
 fig_weekly.update_traces(textposition='outside')
+
+# --- adiciona a linha de média como uma série para aparecer na legenda ---
+fig_weekly.add_scatter(
+    x=weekly_counts['Date'],
+    y=[media_inscritos] * len(weekly_counts),
+    mode='lines',
+    name=f'Média: {media_inscritos:.1f}',
+    line=dict(color='red', dash='dash')
+)
+
+# --- anotação do valor no ponto final da linha ---
+fig_weekly.add_annotation(
+    x=weekly_counts['Date'].iloc[-1],
+    y=media_inscritos,
+    text=f"{media_inscritos:.1f}",
+    showarrow=False,
+    yshift=10,
+    font=dict(color='red')
+)
 
 st.plotly_chart(fig_weekly)
 
