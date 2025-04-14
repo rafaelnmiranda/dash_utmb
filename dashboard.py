@@ -4,46 +4,56 @@ import plotly.express as px
 import requests
 from io import BytesIO
 
-# ─── Correção de City usando lista IBGE ───
+import unicodedata
+import re
+import difflib
+
+# ─── Normalização de texto em nível de módulo ───
+def norm_text(text):
+    """
+    Remove acentos, pontuação e normaliza caixa para matching.
+    """
+    t = unicodedata.normalize('NFKD', str(text))
+    t = ''.join(c for c in t if not unicodedata.combining(c))
+    return re.sub(r'[^a-z0-9\s]', '', t.lower().strip())
+
+# ─── Carrega lista IBGE ───
 @st.cache_data(show_spinner=False)
 def load_ibge_municipios():
-    import unicodedata, re, difflib
     IBGE_URL = (
         "https://raw.githubusercontent.com/"
         "rafaelnmiranda/dash_utmb/"
         "de2e7125c2a3c08c7c41be14c43e528b43c2ea58/"
         "municipios_IBGE.xlsx"
     )
-    # Busca com timeout e levanta exceção em falha
     resp = requests.get(IBGE_URL, timeout=10)
     resp.raise_for_status()
     df = pd.read_excel(BytesIO(resp.content), engine='openpyxl')
-    def norm_text(text):
-        t = unicodedata.normalize('NFKD', str(text))
-        t = ''.join(c for c in t if not unicodedata.combining(c))
-        return re.sub(r'[^a-z0-9\s]', '', t.lower().strip())
     df['City_norm'] = df['City'].apply(norm_text)
-    return df, norm_text
+    return df
 
-# Carrega IBGE e normalizador
+# ─── Carrega IBGE e prepara lista de escolhas ───
 with st.spinner("🔄 Carregando municípios do IBGE..."):
     try:
-        ibge_df, norm_text = load_ibge_municipios()
+        ibge_df = load_ibge_municipios()
         st.success("✅ IBGE carregado")
     except Exception as e:
-        st.error(f"Erro ao carregar IBGE: {e}")
+        st.error(f"❌ Erro ao carregar IBGE: {e}")
         st.stop()
+
 city_choices = ibge_df['City_norm'].tolist()
 
+# ─── Função de correção de cidade ───
 def correct_city(city, cutoff=0.8):
-    """Corrige um nome de cidade via fuzzy matching; retorna original se sem match."""
-    import difflib
+    """
+    Corrige o nome de 'city' via fuzzy matching usando IBGE.
+    Se não houver match acima do cutoff, retorna o original.
+    """
     norm = norm_text(city)
     matches = difflib.get_close_matches(norm, city_choices, n=1, cutoff=cutoff)
     if matches:
         return ibge_df.loc[ibge_df['City_norm'] == matches[0], 'City'].iat[0]
     return city
-# ─────────────────────────────────────────────
 
 # ---------------------------
 # Funções Auxiliares de Formatação
