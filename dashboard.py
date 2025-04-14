@@ -324,35 +324,28 @@ col_m.metric("Meta Alcançada (%)", format_percentage(meta_progress))
 
 ### CIDADES
 # --- Análise de Cidades Brasileiras ---
-# 1. Filtrar apenas inscrições do Brasil
+# Filtrar apenas inscrições do Brasil
 df_br = df_total[df_total['Country'].str.lower() == 'brazil'].copy()
 
-# 2. Cabeçalho
+# Título
 st.subheader("Cidades Brasileiras")
 
-# 3. Métrica: total de municípios distintos
+# Métrica: total de municípios distintos
 num_cidades = df_br['City'].nunique()
 st.metric("Total de municípios distintos", num_cidades)
 
-# 4. Top 10 cidades + percentual
+# Top 10 cidades + percentual
 total_br = len(df_br)
+counts = df_br['City'].value_counts()
+top10 = counts.head(10)
 
-top_cidades = (
-    df_br['City']
-    .value_counts()
-    .head(10)
-    .reset_index()
-    .rename(columns={'index': 'Cidade', 'City': 'Inscritos'})
-)
+# Monta o DataFrame corretamente
+top_cidades = pd.DataFrame({
+    'Cidade': top10.index,
+    'Inscritos': top10.values
+})
 
-# 4.1 Garantir que 'Inscritos' seja inteiro
-top_cidades['Inscritos'] = (
-    pd.to_numeric(top_cidades['Inscritos'], errors='coerce')
-      .fillna(0)
-      .astype(int)
-)
-
-# 4.2 Calcular % do total com segurança
+# Calcula o % do total
 if total_br > 0:
     top_cidades['% do Total'] = (
         top_cidades['Inscritos'] / total_br * 100
@@ -360,10 +353,8 @@ if total_br > 0:
 else:
     top_cidades['% do Total'] = "0.00%"
 
-# 5. Exibir tabela
+# Exibe a tabela
 st.table(top_cidades)
-
-
 
 
 
