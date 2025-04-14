@@ -4,10 +4,6 @@ import plotly.express as px
 import requests
 from io import BytesIO
 
-# ─── Imports necessários para correção de City ───
-import unicodedata
-import re
-import difflib
 
 
 # ---------------------------
