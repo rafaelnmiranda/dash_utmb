@@ -59,46 +59,7 @@ def standardize_nationality(value):
 # ---------------------------
 TAXA_CAMBIO = 5.5  # 1 USD = R$ 5,5
 
-# ---------------------------
-# Correção de nomes das cidades (IBGE)
-# ---------------------------
-IBGE_URL = (
-    "https://raw.githubusercontent.com/"
-    "rafaelnmiranda/dash_utmb/"
-    "de2e7125c2a3c08c7c41be14c43e528b43c2ea58/"
-    "municipios_IBGE.xlsx"
-)
 
-@st.cache_data(show_spinner=False)
-def load_ibge_municipios():
-    """Carrega e normaliza lista de municípios do IBGE."""
-    df = pd.read_excel(IBGE_URL)
-    # Normalização: remover acentos, pontuação, caixa
-    def normalize(text):
-        t = unicodedata.normalize('NFKD', str(text))
-        t = ''.join(c for c in t if not unicodedata.combining(c))
-        t = re.sub(r'[^a-z0-9\s]', '', t.lower().strip())
-        return t
-    df['City_norm'] = df['City'].apply(normalize)
-    return df, normalize
-
-# Carrega IBGE uma única vez
-ibge_df, normalize = load_ibge_municipios()
-city_choices = ibge_df['City_norm'].tolist()
-
-def correct_city(city, cutoff=0.8):
-    """
-    Corrige um nome de cidade via fuzzy matching.
-    Se não encontrar similaridade >= cutoff, retorna o valor original.
-    """
-    norm = normalize(city)
-    matches = difflib.get_close_matches(norm, city_choices, n=1, cutoff=cutoff)
-    if matches:
-        # recupera o nome original do IBGE
-        return ibge_df.loc[
-            ibge_df['City_norm'] == matches[0], 'City'
-        ].values[0]
-    return city
 
 # -----------------------------------------------------
 # 1. Carregamento dos Dados (2023, 2024 e 2025)
