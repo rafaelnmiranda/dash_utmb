@@ -706,11 +706,32 @@ with tab2:
 
 
 with tab3:
-    st.subheader("Comparativo de Receita por Competição (por Ano)")
-    comparativo = df_financial.groupby(['Ano', 'Competition'])['Registration amount'].sum().reset_index()
-    comparativo['Registration amount'] = comparativo['Registration amount'].apply(format_currency)
-    fig_comparativo = px.bar(comparativo, x='Competition', y='Registration amount', color='Ano',
-                              barmode='group', title="Comparativo de Receita por Competição (R$)")
-    st.plotly_chart(fig_comparativo)
+    st.subheader("Participação por Competição (Inscrições Vendidas)")
+
+    # Soma total de inscrições vendidas por competição
+    comp_sum = (
+        df_financial
+        .groupby('Competition')['Registration amount']
+        .sum()
+        .reset_index()
+    )
+
+    # Gráfico de pizza
+    fig_pie = px.pie(
+        comp_sum,
+        names='Competition',
+        values='Registration amount',
+        title="Inscrições Vendidas por Competição (R$)"
+    )
+
+    # Texto dentro das fatias: label + percentual + valor formatado
+    fig_pie.update_traces(
+        textposition='inside',
+        textinfo='label+percent+value',
+        texttemplate='%{label}<br>%{percent} – R$%{value:,.0f}',
+        hovertemplate='%{label}: R$%{value:,.0f} (%{percent})'
+    )
+
+    st.plotly_chart(fig_pie)
 
 st.markdown("***Fim do Dashboard***")
