@@ -141,6 +141,8 @@ if uploaded_files:
                 df['Discounts amount'] = pd.to_numeric(df['Discounts amount'], errors='coerce')
                 if moeda == "USD":
                     df['Discounts amount'] = df['Discounts amount'] * TAXA_CAMBIO
+            if 'City' in df.columns:
+                    df['City'] = df['City'].astype(str).apply(correct_city)
             dfs_2025.append(df)
         except Exception as e:
             st.error(f"Erro ao carregar o arquivo {file.name}: {e}")
@@ -150,6 +152,7 @@ if dfs_2025:
 else:
     df_2025 = None
     st.warning("Aguarde o upload dos arquivos de 2025.")
+
 
 # Unir os dados dos três anos
 dataframes = [df for df in [df_2023, df_2024, df_2025] if df is not None]
