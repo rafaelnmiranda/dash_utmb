@@ -385,6 +385,31 @@ top_cidades['% do Total'] = (
 # 5. Exibir tabela com a nova coluna de %
 st.table(top_cidades)
 
+# 6. Inscritos por Estado (UF) em 2025
+st.subheader("Inscritos por Estado (2025)")
+
+# 6.1. Juntar df_br com IBGE para obter a coluna 'UF'
+df_uf = df_br.merge(
+    ibge_df[['City','UF']],
+    on='City',
+    how='left'
+)
+
+# 6.2. Contar inscritos por UF
+uf_counts = df_uf['UF'].value_counts()
+
+# 6.3. Garantir que todos os UFs do IBGE apareçam (mesmo com zero)
+all_ufs = ibge_df['UF'].dropna().unique()
+uf_counts = uf_counts.reindex(all_ufs, fill_value=0)
+
+# 6.4. Montar DataFrame e ordenar
+uf_df = uf_counts.reset_index()
+uf_df.columns = ['UF', 'Inscritos']
+uf_df = uf_df.sort_values('Inscritos', ascending=False)
+
+# 6.5. Exibir tabela
+st.table(uf_df)
+
 
 ### 3.4 Tabela de Participação dos Atletas (baseado em Email)
 st.subheader("Participação dos Atletas por Ano (baseado em Email)")
