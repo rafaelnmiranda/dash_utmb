@@ -333,12 +333,14 @@ df_br = df_total[
 # 2. Cabeçalho
 st.subheader("Cidades Brasileiras")
 
-# 3. Métrica: total de municípios distintos em 2025
+# 3. Métricas lado a lado: total de municípios distintos e total de atletas
 num_cidades = df_br['City'].nunique()
-st.metric("Total de municípios distintos (2025)", num_cidades)
+total_atletas = len(df_br)
+col1, col2 = st.columns(2)
+col1.metric("Total de municípios distintos (2025)", num_cidades)
+col2.metric("Total de atletas (2025)", total_atletas)
 
 # 4. Top 10 cidades + percentual em 2025
-total_br = len(df_br)
 counts = df_br['City'].value_counts()
 top10 = counts.head(10)
 
@@ -349,15 +351,16 @@ top_cidades = pd.DataFrame({
 })
 
 # 4.2 Calcula % do total
-if total_br > 0:
+if total_atletas > 0:
     top_cidades['% do Total'] = (
-        top_cidades['Inscritos'] / total_br * 100
+        top_cidades['Inscritos'] / total_atletas * 100
     ).map(lambda x: f"{x:.2f}%")
 else:
     top_cidades['% do Total'] = "0.00%"
 
 # 5. Exibir tabela
 st.table(top_cidades)
+
 
 
 
