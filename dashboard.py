@@ -249,6 +249,12 @@ metas_df = metas.merge(inscritos_2025, on="Percurso", how="left").fillna(0)
 metas_df["Inscritos"] = metas_df["Inscritos"].apply(format_integer)
 metas_df["Meta 2025"] = metas_df["Meta 2025"].apply(format_integer)
 metas_df["% da Meta"] = ((metas_df["Inscritos"].astype(float) / metas_df["Meta 2025"].astype(float)) * 100).fillna(0).apply(format_percentage)
+metas_df = metas_df[[
+    "Percurso",
+    "Inscritos",
+    "Meta 2025",
+    "% da Meta"
+]]
 st.table(metas_df)
 
 ### 3.2 Percentual de Mulheres Inscritas (coluna Gender) - somente 2025
@@ -385,7 +391,7 @@ top_cidades['% do Total'] = (
 # 5. Exibir tabela com a nova coluna de %
 st.table(top_cidades)
 
-# 6. Inscritos por Estado (UF) em 2025
+# 6. Inscritos por Estado (2025)
 st.subheader("Inscritos por Estado (2025)")
 
 # 6.1. Juntar df_br com IBGE para obter a coluna 'UF'
@@ -395,20 +401,51 @@ df_uf = df_br.merge(
     how='left'
 )
 
-# 6.2. Contar inscritos por UF
-uf_counts = df_uf['UF'].value_counts()
+# 6.2. Lista completa de UFs do IBGE
+all_ufs = sorted(ibge_df['UF'].dropna().unique())
 
-# 6.3. Garantir que todos os UFs do IBGE apareçam (mesmo com zero)
-all_ufs = ibge_df['UF'].dropna().unique()
-uf_counts = uf_counts.reindex(all_ufs, fill_value=0)
+# 6.3. Contar inscritos por UF, preenchendo zero onde não houver
+uf_counts = df_uf['UF'].value_counts().reindex(all_ufs, fill_value=0)
 
-# 6.4. Montar DataFrame e ordenar
+# 6.4. Montar DataFrame e calcular %
 uf_df = uf_counts.reset_index()
 uf_df.columns = ['UF', 'Inscritos']
-uf_df = uf_df.sort_values('Inscritos', ascending=False)
+uf_df['% do Total'] = (
+    uf_df['Inscritos'] / total_atletas * 100
+).round(2).astype(str) + '%'
 
-# 6.5. Exibir tabela
+# 6.5. Ordenar e exibir
+uf_df = uf_df.sort_values('Inscritos', ascending=False)
 st.table(uf_df)
+
+
+# 7. Inscritos por Região (2025)
+st.subheader("Inscritos por Região (2025)")
+
+# 7.1. Juntar df_br com IBGE para obter a coluna 'Região'
+df_reg = df_br.merge(
+    ibge_df[['City','Região']],
+    on='City',
+    how='left'
+)
+
+# 7.2. Lista completa de Regiões do IBGE
+all_regs = sorted(ibge_df['Região'].dropna().unique())
+
+# 7.3. Contar inscritos por Região, preenchendo zero onde não houver
+reg_counts = df_reg['Região'].value_counts().reindex(all_regs, fill_value=0)
+
+# 7.4. Montar DataFrame e calcular %
+reg_df = reg_counts.reset_index()
+reg_df.columns = ['Região', 'Inscritos']
+reg_df['% do Total'] = (
+    reg_df['Inscritos'] / total_atletas * 100
+).round(2).astype(str) + '%'
+
+# 7.5. Ordenar e exibir
+reg_df = reg_df.sort_values('Inscritos', ascending=False)
+st.table(reg_df)
+
 
 
 ### 3.4 Tabela de Participação dos Atletas (baseado em Email)
