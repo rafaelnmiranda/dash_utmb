@@ -261,14 +261,40 @@ if 'Gender' in df_total.columns:
 else:
     st.info("Coluna 'Gender' não encontrada.")
 
-### 3.3 Número de Países Diferentes (coluna Nationality) - somente 2025
+### 3.3 Número de Países Diferentes e % de Estrangeiros (2025)
 if 'Nationality' in df_total.columns:
+    # filtrar apenas 2025
     df_2025_nat = df_total[df_total['Ano'] == 2025].copy()
-    df_2025_nat['Nationality_std'] = df_2025_nat['Nationality'].dropna().apply(standardize_nationality)
+    # padronizar nacionalidades
+    df_2025_nat['Nationality_std'] = (
+        df_2025_nat['Nationality']
+        .dropna()
+        .apply(standardize_nationality)
+    )
+    # número de países distintos
     num_paises_2025 = df_2025_nat['Nationality_std'].nunique()
-    st.metric("Número de Países Diferentes (2025)", format_integer(num_paises_2025))
+    # total de atletas 2025
+    total_2025 = len(df_2025_nat)
+    # contar estrangeiros (tudo que não for "BR")
+    num_estrangeiros = df_2025_nat[
+        df_2025_nat['Nationality_std'] != 'BR'
+    ].shape[0]
+    # calcular %
+    perc_estrangeiros = (num_estrangeiros / total_2025) * 100 if total_2025 else 0
+
+    # exibir lado a lado
+    col1, col2 = st.columns(2)
+    col1.metric(
+        "Número de Países Diferentes (2025)",
+        format_integer(num_paises_2025)
+    )
+    col2.metric(
+        "% de Estrangeiros (2025)",
+        format_percentage(perc_estrangeiros)
+    )
 else:
     st.info("Coluna 'Nationality' não encontrada.")
+
 
 ### NOVO: Idade Média e Distribuição das Idades dos Atletas (2025)
 if 'Birthdate' in df_total.columns:
