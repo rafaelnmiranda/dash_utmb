@@ -334,35 +334,30 @@ df_br = df_total[
 st.subheader("Cidades Brasileiras")
 
 # 3. Métricas lado a lado: total de municípios distintos e total de atletas
-num_cidades = df_br['City'].nunique()
+num_cidades   = df_br['City'].nunique()
 total_atletas = len(df_br)
 col1, col2 = st.columns(2)
 col1.metric("Total de municípios distintos (2025)", num_cidades)
 col2.metric("Total de atletas (2025)", total_atletas)
 
 # 4. Top 10 cidades + percentual em 2025
-counts = df_br['City'].value_counts()
-top10 = counts.head(10)
+# 4.1 Contagem e montagem do DataFrame
+top_cidades = (
+    df_br['City']
+    .value_counts()
+    .head(10)
+    .rename_axis('Cidade')
+    .reset_index(name='Inscritos')
+)
 
-# 4.1 Monta o DataFrame
-top_cidades = pd.DataFrame({
-    'Cidade': top10.index,
-    'Inscritos': top10.values
-})
+# 4.2 Cálculo do % do total de atletas
+top_cidades['% do Total'] = (
+    top_cidades['Inscritos'] 
+    / total_atletas * 100
+).round(2).astype(str) + '%'
 
-# 4.2 Calcula % do total
-if total_atletas > 0:
-    top_cidades['% do Total'] = (
-        top_cidades['Inscritos'] / total_atletas * 100
-    ).map(lambda x: f"{x:.2f}%")
-else:
-    top_cidades['% do Total'] = "0.00%"
-
-# 5. Exibir tabela
+# 5. Exibir tabela com a nova coluna de %
 st.table(top_cidades)
-
-
-
 
 
 ### 3.4 Tabela de Participação dos Atletas (baseado em Email)
