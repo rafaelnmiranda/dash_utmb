@@ -246,8 +246,8 @@ if 'TOTAL' not in inscritos_2025['Percurso'].values:
     total_row = pd.DataFrame([{'Percurso': 'TOTAL', 'Inscritos': total_inscritos_2025}])
     inscritos_2025 = pd.concat([inscritos_2025, total_row], ignore_index=True)
 metas_df = metas.merge(inscritos_2025, on="Percurso", how="left").fillna(0)
-metas_df["Meta 2025"] = metas_df["Meta 2025"].apply(format_integer)
 metas_df["Inscritos"] = metas_df["Inscritos"].apply(format_integer)
+metas_df["Meta 2025"] = metas_df["Meta 2025"].apply(format_integer)
 metas_df["% da Meta"] = ((metas_df["Inscritos"].astype(float) / metas_df["Meta 2025"].astype(float)) * 100).fillna(0).apply(format_percentage)
 st.table(metas_df)
 
