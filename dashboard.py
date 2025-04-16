@@ -414,9 +414,18 @@ uf_df['% do Total'] = (
     uf_df['Inscritos'] / total_atletas * 100
 ).round(2).astype(str) + '%'
 
-# 6.5. Ordenar e exibir
-uf_df = uf_df.sort_values('Inscritos', ascending=False)
+# 6.5. Ordenar, redefinir índice e ajustar numeração
+uf_df = (
+    uf_df
+    .sort_values('Inscritos', ascending=False)    # ordem decrescente
+    .reset_index(drop=True)                       # descarta índice antigo
+)
+uf_df.index = uf_df.index + 1                     # numera de 1 em diante
+uf_df.index.name = 'Posição'                      # nomeia a coluna de índice
+
+# 6.6. Exibir tabela com numeração ordenada
 st.table(uf_df)
+
 
 
 # 7. Inscritos por Região (2025)
@@ -502,19 +511,39 @@ st.pyplot(plt)
 
 
 
-### 3.5 Top 10 Países Inscritos em 2025
+# 3.5 Top 10 Países Estrangeiros Inscritos em 2025 (com %)
 if 'Nationality' in df_total.columns:
-    df_2025_only = df_total[df_total['Ano'] == 2025]
-    top_paises = df_2025_only['Nationality'].dropna().apply(standardize_nationality).value_counts().head(10).reset_index()
-    top_paises.columns = ['País', 'Inscritos']
-    top_paises['Inscritos'] = top_paises['Inscritos'].apply(format_integer)
-    st.subheader("Top 10 Países Inscritos em 2025")
-    total_top = top_paises['Inscritos'].astype(int).sum()
-    total_row = pd.DataFrame([{'País': 'Total', 'Inscritos': format_integer(total_top)}])
-    top_paises = pd.concat([top_paises, total_row], ignore_index=True)
-    st.table(top_paises)
+    # 1) Filtrar apenas 2025 e padronizar nacionalidades
+    df_2025 = df_total[df_total['Ano'] == 2025].copy()
+    df_2025['Nat_std'] = df_2025['Nationality'].dropna().apply(standardize_nationality)
+
+    # 2) Remover BR e contar todos os estrangeiros
+    vc = df_2025[df_2025['Nat_std'] != 'BR']['Nat_std'].value_counts()
+    total_estrangeiros = vc.sum()
+
+    # 3) Construir DataFrame Top 10
+    df_top = vc.head(10).reset_index()
+    df_top.columns = ['País', 'Count']
+
+    # 4) Formatar inscritos e calcular %
+    df_top['Inscritos'] = df_top['Count'].apply(format_integer)
+    df_top['%'] = (df_top['Count'] / total_estrangeiros * 100) \
+                    .round(0).astype(int).astype(str) + '%'
+
+    # 5) Linha de total
+    total_row = pd.DataFrame([{
+        'País': 'Total Estrangeiros',
+        'Inscritos': format_integer(total_estrangeiros),
+        '%': '100%'
+    }])
+
+    # 6) Exibir
+    st.subheader("Top 10 Países Estrangeiros Inscritos em 2025")
+    st.table(pd.concat([df_top[['País','Inscritos','%']], total_row], ignore_index=True))
+
 else:
     st.info("Coluna 'Nationality' não encontrada.")
+
 
 ### 3.6 Comparativo de Inscrições até Data Base
 # Calcula a data base dinâmica (última inscrição de 2025)
