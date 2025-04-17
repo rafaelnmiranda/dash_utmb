@@ -703,36 +703,40 @@ st.plotly_chart(fig_weekday)
 # --- 3.x Top 15 dias de venda em 2025 ---
 # Reaproveita daily_counts e weekday_avg do seu bloco anterior
 
-# 1. Mapeia a média por weekday ao daily_counts
+# 1. Mapeia a média por dia da semana ao daily_counts
 media_por_dia = weekday_avg.set_index('Weekday')['Media Inscritos']
 daily_counts['Media_Semanadia'] = daily_counts['Weekday'].map(media_por_dia)
 
-# 2. Calcula % acima da média do dia da semana
+# 2. Calcula o percentual acima da média do dia da semana
 daily_counts['%_Acima_Media'] = (
     (daily_counts['Inscritos'] - daily_counts['Media_Semanadia'])
     / daily_counts['Media_Semanadia'] * 100
 )
 
-# 3. Formata a data e o percentual
-daily_counts['Data_Formatada'] = daily_counts['Date'].dt.strftime('%d/%m/%y') \
+# 3. Formatação: data e percentual sem casas decimais
+daily_counts['Dia (dd/mm/aa)'] = (
+    daily_counts['Date'].dt.strftime('%d/%m/%y')
     + ' (' + daily_counts['Weekday'].map(weekday_names) + ')'
-daily_counts['%_Acima_Media'] = daily_counts['%_Acima_Media'].round(2)
+)
+daily_counts['% acima da média'] = (
+    daily_counts['%_Acima_Media']
+    .round(0)
+    .astype(int)
+    .astype(str) + '%'
+)
 
-# 4. Seleciona top 15 e ordena
+# 4. Seleciona os top 15 por quantidade de vendas e ordena
 top15 = (
     daily_counts
     .sort_values('Inscritos', ascending=False)
     .head(15)
-    .loc[:, ['Data_Formatada', 'Inscritos', '%_Acima_Media']]
+    .loc[:, ['Dia (dd/mm/aa)', 'Inscritos', '% acima da média']]
 )
 
 # 5. Exibe no Streamlit como tabela
 st.subheader("Top 15 Dias de Maior Venda (2025)")
-st.table(top15.rename(columns={
-    'Data_Formatada': 'Dia (dd/mm/aa)', 
-    'Inscritos': 'Vendas', 
-    '%_Acima_Media': '% acima da média'
-}))
+st.table(top15)
+
 
 
 ### 3.7 Gráfico de Inscrições Acumuladas - 2025
