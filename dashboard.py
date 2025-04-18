@@ -456,6 +456,73 @@ reg_df = reg_df.sort_values('Inscritos', ascending=False)
 st.table(reg_df)
 
 
+# ─── Corrige nomes de City em 2023 e 2024 ───
+for df in (df_2023, df_2024):
+    if 'City' in df.columns:
+        df['City'] = df['City'].astype(str).apply(correct_city)
+
+# 1) Prepara dados Brasil por ano
+df_br_2023 = df_total.query("Ano==2023 and Country.str.lower()=='brazil'", engine="python")
+df_br_2024 = df_total.query("Ano==2024 and Country.str.lower()=='brazil'", engine="python")
+df_br_2025 = df_total.query("Ano==2025 and Country.str.lower()=='brazil'", engine="python")
+tot23, tot24, tot25 = map(len, (df_br_2023, df_br_2024, df_br_2025))
+
+# --- Tabela Cidades (Top 10 em 2025) ---
+top_cities25 = df_br_2025['City'].value_counts().head(10)
+df_cmp_cidades = pd.DataFrame({
+    'Cidade': top_cities25.index,
+    'Inscritos': top_cities25.values,
+})
+df_cmp_cidades['%'] = (df_cmp_cidades['Inscritos']/tot25*100).round(2).astype(str)+'%'
+for ano, df_ano, col_c, col_p, tot in [
+    (2023, df_br_2023, 'Inscritos 2023', '% 2023', tot23),
+    (2024, df_br_2024, 'Inscritos 2024', '% 2024', tot24),
+]:
+    cnt = df_ano['City'].value_counts().reindex(df_cmp_cidades['Cidade'], fill_value=0)
+    df_cmp_cidades[col_c] = cnt.values
+    df_cmp_cidades[col_p] = (cnt/tot*100).round(2).astype(str)+'%'
+st.subheader("Cidades – 2023 vs 2024 vs 2025")
+st.table(df_cmp_cidades)
+
+# --- Tabela Estados (todas UFs) ---
+df_uf23 = df_br_2023.merge(ibge_df[['City','UF']], on='City', how='left')
+df_uf24 = df_br_2024.merge(ibge_df[['City','UF']], on='City', how='left')
+df_uf25 = df_br_2025.merge(ibge_df[['City','UF']], on='City', how='left')
+ufs = df_uf25['UF'].dropna().unique()
+cnt25 = df_uf25['UF'].value_counts().reindex(ufs, fill_value=0)
+df_cmp_uf = pd.DataFrame({'UF': cnt25.index, 'Inscritos': cnt25.values})
+df_cmp_uf['%'] = (df_cmp_uf['Inscritos']/tot25*100).round(2).astype(str)+'%'
+for ano, df_ano, col_c, col_p, tot in [
+    (2023, df_uf23, 'Inscritos 2023', '% 2023', tot23),
+    (2024, df_uf24, 'Inscritos 2024', '% 2024', tot24),
+]:
+    cnt = df_ano['UF'].value_counts().reindex(df_cmp_uf['UF'], fill_value=0)
+    df_cmp_uf[col_c] = cnt.values
+    df_cmp_uf[col_p] = (cnt/tot*100).round(2).astype(str)+'%'
+df_cmp_uf = df_cmp_uf.sort_values('Inscritos', ascending=False)
+st.subheader("Estados – 2023 vs 2024 vs 2025")
+st.table(df_cmp_uf)
+
+# --- Tabela Regiões (todas Regiões) ---
+df_reg23 = df_br_2023.merge(ibge_df[['City','Região']], on='City', how='left')
+df_reg24 = df_br_2024.merge(ibge_df[['City','Região']], on='City', how='left')
+df_reg25 = df_br_2025.merge(ibge_df[['City','Região']], on='City', how='left')
+regs = df_reg25['Região'].dropna().unique()
+r25 = df_reg25['Região'].value_counts().reindex(regs, fill_value=0)
+df_cmp_reg = pd.DataFrame({'Região': r25.index, 'Inscritos': r25.values})
+df_cmp_reg['%'] = (df_cmp_reg['Inscritos']/tot25*100).round(2).astype(str)+'%'
+for ano, df_ano, col_c, col_p, tot in [
+    (2023, df_reg23, 'Inscritos 2023', '% 2023', tot23),
+    (2024, df_reg24, 'Inscritos 2024', '% 2024', tot24),
+]:
+    cnt = df_ano['Região'].value_counts().reindex(df_cmp_reg['Região'], fill_value=0)
+    df_cmp_reg[col_c] = cnt.values
+    df_cmp_reg[col_p] = (cnt/tot*100).round(2).astype(str)+'%'
+df_cmp_reg = df_cmp_reg.sort_values('Inscritos', ascending=False)
+st.subheader("Regiões – 2023 vs 2024 vs 2025")
+st.table(df_cmp_reg)
+
+
 
 ### 3.4 Tabela de Participação dos Atletas (baseado em Email)
 st.subheader("Participação dos Atletas por Ano (baseado em Email)")
