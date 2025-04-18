@@ -14,22 +14,25 @@ def apply_print_css():
     st.markdown("""
     <style>
     @media print {
-     
-      [data-testid="stSidebar"] { display: none !important; }
-      header, footer, nav { display: none !important; }
-
-     
-      .element-container, .stTable, .plotly-graph-div {
-        page-break-inside: avoid !important;
+      # 1) Esconde tudo 
+      body * {
+        visibility: hidden !important;
       }
-
-     
-      .page-break { page-break-after: always; }
+      # 2) Exibe somente o container #print-content 
+      #print-content, #print-content * {
+        visibility: visible !important;
+      }
+      # 3) Garante que #print-content ocupe toda a página 
+      #print-content {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+      }
     }
     </style>
     """, unsafe_allow_html=True)
 
-# chame assim:
 apply_print_css()
 
 def page_break():
@@ -357,7 +360,6 @@ col_p, col_m = st.columns(2)
 col_p.metric("Prazo Decorrido (%)", format_percentage(prazo_percent))
 col_m.metric("Meta Alcançada (%)", format_percentage(meta_progress))
 
-page_break()
 
 
 ### NOVO: Idade Média e Distribuição das Idades dos Atletas (2025)
@@ -372,6 +374,8 @@ if 'Birthdate' in df_total.columns:
     # Calcula a idade média e exibe em um metric
     mean_age = df_2025_age['Age'].mean()
     st.metric("Idade Média dos Atletas (2025)", format_integer(mean_age))
+
+page_break()
     
     # Cria o gráfico de distribuição de idade
     import plotly.figure_factory as ff
@@ -392,7 +396,7 @@ df_br = df_total[
 ].copy()
 
 # 2. Cabeçalho
-st.subheader("Cidades Brasileiras")
+st.subheader("Cidades Brasileiras - Apenas atletas brasileiros")
 
 # 3. Métricas lado a lado: total de municípios distintos e total de atletas
 num_cidades   = df_br['City'].nunique()
@@ -419,6 +423,8 @@ top_cidades['% do Total'] = (
 
 # 5. Exibir tabela com a nova coluna de %
 st.table(top_cidades)
+
+page_break()
 
 # 6. Inscritos por Estado (2025)
 st.subheader("Inscritos por Estado (2025)")
@@ -484,6 +490,7 @@ reg_df['% do Total'] = (
 reg_df = reg_df.sort_values('Inscritos', ascending=False)
 st.table(reg_df)
 
+page_break()
 
 # ─── Corrige nomes de City em 2023 e 2024 ───
 for df in (df_2023, df_2024):
