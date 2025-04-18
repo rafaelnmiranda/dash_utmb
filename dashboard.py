@@ -14,16 +14,16 @@ def apply_print_css():
     st.markdown("""
     <style>
     @media print {
-      /* 1. Oculta sidebar, cabeçalho e rodapé */
+      # 1. Oculta sidebar, cabeçalho e rodapé 
       [data-testid="stSidebar"] { display: none !important; }
       header, footer, nav { display: none !important; }
 
-      /* 2. Evita cortes internos nas tabelas e charts */
+      # 2. Evita cortes internos nas tabelas e charts 
       .element-container, .stTable, .plotly-graph-div {
         page-break-inside: avoid !important;
       }
 
-      /* 3. Classe helper para forçar quebra após seção */
+      # 3. Classe helper para forçar quebra após seção 
       .page-break { page-break-after: always; }
     }
     </style>
