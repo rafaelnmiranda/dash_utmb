@@ -262,7 +262,7 @@ def main():
     st.markdown(f'<p class="titulo">Dashboard de Inscrições - Paraty Brazil by UTMB ({data_base_str})</p>', unsafe_allow_html=True)
     
     if section == "Resumo Geral":
-        st.header("Resumo Geral")
+        st.header("Resumo Geral - GROK")
         
         # Metas de Inscritos
         st.subheader("Metas de Inscritos por Percurso - 2025")
