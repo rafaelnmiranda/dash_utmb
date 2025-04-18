@@ -15,34 +15,24 @@ def apply_print_css():
     st.markdown("""
     <style>
     @media print {
-      /* Esconde tudo */
-      body * {
-        visibility: hidden !important;
+      /* 1) Oculta somente a sidebar, toolbar, header e footer */
+      [data-testid="stSidebar"], [data-testid="stToolbar"], header, footer {
+        display: none !important;
       }
-      /* Exibe apenas o container print-content */
-      #print-content, #print-content * {
-        visibility: visible !important;
-      }
-      /* Garante que o container ocupe toda a página */
-      #print-content {
-        position: absolute;
-        top: 0;
-        left: 0;
-        width: 100%;
-      }
-      /* Evita que tabelas e gráficos sejam cortados no meio */
+      /* 2) Impede que tabelas e gráficos sejam cortados no meio */
       .element-container, .stTable, .plotly-graph-div {
         page-break-inside: avoid !important;
       }
-      /* Classe helper para forçar quebra de página */
+      /* 3) Classe helper para forçar quebra de página */
       .page-break {
-        page-break-after: always;
+        page-break-after: always !important;
       }
     }
     </style>
     """, unsafe_allow_html=True)
 
 apply_print_css()
+
 
 def page_break():
     st.markdown('<div class="page-break"></div>', unsafe_allow_html=True)
