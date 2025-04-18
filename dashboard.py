@@ -378,8 +378,6 @@ if 'Birthdate' in df_total.columns:
     # Calcula a idade média e exibe em um metric
     mean_age = df_2025_age['Age'].mean()
     st.metric("Idade Média dos Atletas (2025)", format_integer(mean_age))
-
-page_break()
     
     # Cria o gráfico de distribuição de idade
     hist_data = [df_2025_age['Age'].dropna().tolist()]
