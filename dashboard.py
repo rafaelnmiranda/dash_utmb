@@ -8,6 +8,34 @@ import unicodedata
 import re
 import difflib
 
+st.set_page_config(layout="wide")
+
+def apply_print_css():
+    st.markdown("""
+    <style>
+    @media print {
+      /* 1. Oculta sidebar, cabeçalho e rodapé */
+      [data-testid="stSidebar"] { display: none !important; }
+      header, footer, nav { display: none !important; }
+
+      /* 2. Evita cortes internos nas tabelas e charts */
+      .element-container, .stTable, .plotly-graph-div {
+        page-break-inside: avoid !important;
+      }
+
+      /* 3. Classe helper para forçar quebra após seção */
+      .page-break { page-break-after: always; }
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+# chame assim:
+apply_print_css()
+
+def page_break():
+    st.markdown('<div class="page-break"></div>', unsafe_allow_html=True)
+
+
 # ─── Normalização de texto em nível de módulo ───
 def norm_text(text):
     """
@@ -302,30 +330,6 @@ else:
     st.info("Coluna 'Nationality' não encontrada.")
 
 
-### NOVO: Idade Média e Distribuição das Idades dos Atletas (2025)
-if 'Birthdate' in df_total.columns:
-    df_2025_age = df_total[df_total['Ano'] == 2025].copy()
-    # Converte a coluna "Birthdate" para datetime
-    df_2025_age['Birthdate'] = pd.to_datetime(df_2025_age['Birthdate'], errors='coerce')
-    df_2025_age['Age'] = 2025 - df_2025_age['Birthdate'].dt.year
-    # Se a idade calculada for menor que 15, define como 40
-    df_2025_age.loc[df_2025_age['Age'] < 15, 'Age'] = 40
-
-    # Calcula a idade média e exibe em um metric
-    mean_age = df_2025_age['Age'].mean()
-    st.metric("Idade Média dos Atletas (2025)", format_integer(mean_age))
-    
-    # Cria o gráfico de distribuição de idade
-    import plotly.figure_factory as ff
-    hist_data = [df_2025_age['Age'].dropna().tolist()]
-    group_labels = ['Idades']
-    fig_age = ff.create_distplot(hist_data, group_labels, show_hist=True, show_rug=False)
-    fig_age.update_layout(title_text='Distribuição de Idade dos Atletas (2025)')
-    st.plotly_chart(fig_age)
-else:
-    st.info("Coluna 'Birthdate' não encontrada.")
-
-
 ### Novo: Comparação entre Prazo Decorrido e Meta Alcançada
 # Definir datas do prazo de vendas:
 start_date = pd.Timestamp("2024-10-28")
@@ -353,7 +357,32 @@ col_p, col_m = st.columns(2)
 col_p.metric("Prazo Decorrido (%)", format_percentage(prazo_percent))
 col_m.metric("Meta Alcançada (%)", format_percentage(meta_progress))
 
+page_break()
 
+
+### NOVO: Idade Média e Distribuição das Idades dos Atletas (2025)
+if 'Birthdate' in df_total.columns:
+    df_2025_age = df_total[df_total['Ano'] == 2025].copy()
+    # Converte a coluna "Birthdate" para datetime
+    df_2025_age['Birthdate'] = pd.to_datetime(df_2025_age['Birthdate'], errors='coerce')
+    df_2025_age['Age'] = 2025 - df_2025_age['Birthdate'].dt.year
+    # Se a idade calculada for menor que 15, define como 40
+    df_2025_age.loc[df_2025_age['Age'] < 15, 'Age'] = 40
+
+    # Calcula a idade média e exibe em um metric
+    mean_age = df_2025_age['Age'].mean()
+    st.metric("Idade Média dos Atletas (2025)", format_integer(mean_age))
+    
+    # Cria o gráfico de distribuição de idade
+    import plotly.figure_factory as ff
+    hist_data = [df_2025_age['Age'].dropna().tolist()]
+    group_labels = ['Idades']
+    fig_age = ff.create_distplot(hist_data, group_labels, show_hist=True, show_rug=False)
+    fig_age.update_layout(title_text='Distribuição de Idade dos Atletas (2025)')
+    st.plotly_chart(fig_age)
+else:
+    st.info("Coluna 'Birthdate' não encontrada.")
+    
 ### CIDADES
 # --- Análise de Cidades Brasileiras (2025) ---
 # 1. Filtrar apenas inscrições do Brasil no ano de 2025
