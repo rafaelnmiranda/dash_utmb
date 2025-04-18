@@ -250,6 +250,9 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+
+st.markdown('<div id="print-content">', unsafe_allow_html=True)
+
 st.markdown(f'<p class="titulo">Dashboard de Inscrições - Paraty Brazil by UTMB ({data_base_str})</p>', unsafe_allow_html=True)
 
 
@@ -1081,5 +1084,7 @@ with tab4:
     )
 
     st.plotly_chart(fig_weekday)
+
+st.markdown('</div>', unsafe_allow_html=True)
 
 st.markdown("***Fim do Dashboard***")
