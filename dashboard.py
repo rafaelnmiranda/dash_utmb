@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import plotly.figure_factory as ff
 import requests
 from io import BytesIO
 
@@ -381,7 +382,6 @@ if 'Birthdate' in df_total.columns:
 page_break()
     
     # Cria o gráfico de distribuição de idade
-    import plotly.figure_factory as ff
     hist_data = [df_2025_age['Age'].dropna().tolist()]
     group_labels = ['Idades']
     fig_age = ff.create_distplot(hist_data, group_labels, show_hist=True, show_rug=False)
