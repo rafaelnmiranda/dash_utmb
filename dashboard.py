@@ -262,7 +262,7 @@ def main():
     st.markdown(f'<p class="titulo">Dashboard de Inscrições - Paraty Brazil by UTMB ({data_base_str})</p>', unsafe_allow_html=True)
     
     if section == "Resumo Geral":
-        st.header("Resumo Geral - GROK")
+        st.header("Resumo Geral")
         
         # Metas de Inscritos
         st.subheader("Metas de Inscritos por Percurso - 2025")
@@ -695,7 +695,7 @@ def main():
             proj_30 = total_2025_current + mm30 * delta_days
             projection_df = pd.DataFrame({
                 'Média Móvel': ['7 dias', '15 dias', '30 dias'],
-                'Valor Médio Diário': [formatter.integer(mm החטאים), formatter.integer(mm15), formatter.integer(mm30)],
+                'Valor Médio Diário': [formatter.integer(mm7), formatter.integer(mm15), formatter.integer(mm30)],
                 'Projeção Inscritos (15/08/2025)': [formatter.integer(proj_7), formatter.integer(proj_15), formatter.integer(proj_30)]
             })
             st.table(projection_df)
