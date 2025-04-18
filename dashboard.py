@@ -15,20 +15,28 @@ def apply_print_css():
     st.markdown("""
     <style>
     @media print {
-      # 1) Esconde tudo 
+      /* Esconde tudo */
       body * {
         visibility: hidden !important;
       }
-      # 2) Exibe somente o container #print-content 
+      /* Exibe apenas o container print-content */
       #print-content, #print-content * {
         visibility: visible !important;
       }
-      # 3) Garante que #print-content ocupe toda a página 
+      /* Garante que o container ocupe toda a página */
       #print-content {
         position: absolute;
         top: 0;
         left: 0;
         width: 100%;
+      }
+      /* Evita que tabelas e gráficos sejam cortados no meio */
+      .element-container, .stTable, .plotly-graph-div {
+        page-break-inside: avoid !important;
+      }
+      /* Classe helper para forçar quebra de página */
+      .page-break {
+        page-break-after: always;
       }
     }
     </style>
