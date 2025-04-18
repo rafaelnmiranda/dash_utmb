@@ -538,6 +538,8 @@ df_cmp_uf = df_cmp_uf.sort_values('Inscritos', ascending=False)
 st.subheader("Estados – 2023 vs 2024 vs 2025")
 st.table(df_cmp_uf)
 
+page_break()
+
 # --- Tabela Regiões (todas Regiões) ---
 df_reg23 = df_br_2023.merge(ibge_df[['City','Região']], on='City', how='left')
 df_reg24 = df_br_2024.merge(ibge_df[['City','Região']], on='City', how='left')
@@ -802,6 +804,9 @@ fig_weekday.update_traces(texttemplate='%{text:.2f}', textposition='outside')
 
 st.plotly_chart(fig_weekday)
 
+
+page_break()
+
 # --- 3.x Top 15 dias de venda em 2025 ---
 # Reaproveita daily_counts e weekday_avg do seu bloco anterior
 
@@ -882,6 +887,9 @@ if df_2025 is not None and 'Registration date' in df_2025.columns:
     st.table(projection_df)
 else:
     st.info("Dados de 2025 não disponíveis para cálculo de média móvel e projeção.")
+
+
+page_break()
 
 # -----------------------------------------------------
 # 4. Filtro de Ano para Métricas Financeiras
