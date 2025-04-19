@@ -500,22 +500,12 @@ if pd.isna(last_date):
     st.error("Nenhuma data de inscrição válida encontrada para 2025. Verifique os dados.")
     st.stop()
 
-# Calculate intervals: Revert to original method with 1-day shift
+# Calculate intervals: Use the original method with 1-day shift
 intervals = []
 for i in range(10):
     end = last_date - pd.Timedelta(days=1) - pd.Timedelta(days=7 * i)
     start = end - pd.Timedelta(days=6)
     intervals.append((start, end))
-
-# Debug: Display the intervals and data range to ensure correctness
-st.write("Intervalos calculados:", [(start.strftime('%d/%m/%Y'), end.strftime('%d/%m/%Y')) for start, end in intervals])
-st.write("Período de datas no dataset:", 
-         f"{df_2025_acc['Date'].min().strftime('%d/%m/%Y')} a {df_2025_acc['Date'].max().strftime('%d/%m/%Y')}")
-
-# Debug: Show the distribution of registration dates
-date_counts = df_2025_acc['Date'].value_counts().sort_index()
-st.write("Distribuição de inscrições por data:", 
-         date_counts.rename(index=lambda x: x.strftime('%d/%m/%Y')).to_dict())
 
 # Count registrations per interval
 data = []
@@ -526,7 +516,11 @@ for start, end in intervals:
 
 weekly_counts = pd.DataFrame(data)[::-1].reset_index(drop=True)
 
-# Always render the chart, even if all values are zero
+# Display a warning if no inscriptions are found, but still render the chart
+if weekly_counts['Inscritos'].sum() == 0:
+    st.warning("Nenhuma inscrição encontrada nas últimas 10 semanas.")
+
+# Render the chart
 media_inscritos = weekly_counts['Inscritos'].mean()
 fig_weekly = px.bar(
     weekly_counts,
