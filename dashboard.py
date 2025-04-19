@@ -500,11 +500,11 @@ if pd.isna(last_date):
     st.error("Nenhuma data de inscrição válida encontrada para 2025. Verifique os dados.")
     st.stop()
 
-# Calculate intervals: Each interval is a 7-day period ending on last_date
+# Calculate intervals: Start from last_date and go backwards 10 weeks
 intervals = []
-for i in range(10):
+for i in range(9, -1, -1):  # Count backwards from 9 to 0 to get oldest to newest
+    start = last_date - pd.Timedelta(days=7 * i + 6)
     end = last_date - pd.Timedelta(days=7 * i)
-    start = end - pd.Timedelta(days=6)
     intervals.append((start, end))
 
 # Debug: Display the intervals and data range to ensure correctness
@@ -519,7 +519,8 @@ for start, end in intervals:
     label = f"{start.strftime('%d/%m')} – {end.strftime('%d/%m')}"
     data.append({'Semana': label, 'Inscritos': cnt})
 
-weekly_counts = pd.DataFrame(data)[::-1].reset_index(drop=True)
+weekly_counts = pd.DataFrame(data)  # No need to reverse since intervals are now in correct order
+# weekly_counts = pd.DataFrame(data)[::-1].reset_index(drop=True)  # Removed this line
 
 # Check if there's any data to display
 if weekly_counts['Inscritos'].sum() == 0:
