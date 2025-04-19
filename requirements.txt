@@ -4,3 +4,7 @@ plotly
 openpyxl
 scipy
 matplotlib-venn
+requests
+pdfkit
+matplotlib   # dependência do venn
+weasyprint   # fallback de PDF
