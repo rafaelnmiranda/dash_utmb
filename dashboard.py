@@ -493,42 +493,64 @@ st.subheader("Inscrições por Semana (Últimas 10 Semanas)")
 df_2025_acc = df_2025.copy()
 df_2025_acc['Date'] = pd.to_datetime(df_2025_acc['Registration date'].dt.date)
 df_2025_acc = df_2025_acc.sort_values('Date')
+
+# Get the last date and ensure it's valid
 last_date = df_2025_acc['Date'].max()
-intervals = [(last_date - pd.Timedelta(days=1) - pd.Timedelta(days=7 * i),
-              last_date - pd.Timedelta(days=1) - pd.Timedelta(days=7 * i) - pd.Timedelta(days=6))
-             for i in range(10)]
+if pd.isna(last_date):
+    st.error("Nenhuma data de inscrição válida encontrada para 2025. Verifique os dados.")
+    st.stop()
+
+# Calculate intervals: Each interval is a 7-day period ending on last_date
+intervals = []
+for i in range(10):
+    end = last_date - pd.Timedelta(days=7 * i)
+    start = end - pd.Timedelta(days=6)
+    intervals.append((start, end))
+
+# Debug: Display the intervals and data range to ensure correctness
+st.write("Intervalos calculados:", [(start.strftime('%d/%m/%Y'), end.strftime('%d/%m/%Y')) for start, end in intervals])
+st.write("Período de datas no dataset:", 
+         f"{df_2025_acc['Date'].min().strftime('%d/%m/%Y')} a {df_2025_acc['Date'].max().strftime('%d/%m/%Y')}")
+
+# Count registrations per interval
 data = []
 for start, end in intervals:
     cnt = df_2025_acc[(df_2025_acc['Date'] >= start) & (df_2025_acc['Date'] <= end)].shape[0]
     label = f"{start.strftime('%d/%m')} – {end.strftime('%d/%m')}"
     data.append({'Semana': label, 'Inscritos': cnt})
+
 weekly_counts = pd.DataFrame(data)[::-1].reset_index(drop=True)
-media_inscritos = weekly_counts['Inscritos'].mean()
-fig_weekly = px.bar(
-    weekly_counts,
-    x='Semana',
-    y='Inscritos',
-    text='Inscritos',
-    title="Inscrições Vendidas por Semana (Últimas 10 Semanas) - 2025",
-    labels={"Semana": "Período", "Inscritos": "Quantidade de Inscrições"}
-)
-fig_weekly.update_traces(textposition='outside')
-fig_weekly.add_scatter(
-    x=weekly_counts['Semana'],
-    y=[media_inscritos] * len(weekly_counts),
-    mode='lines',
-    name=f'Média: {media_inscritos:.1f}',
-    line=dict(color='orange')
-)
-fig_weekly.add_annotation(
-    x=weekly_counts['Semana'].iloc[-1],
-    y=media_inscritos,
-    text=f"{media_inscritos:.1f}",
-    showarrow=False,
-    yshift=10,
-    font=dict(color='orange')
-)
-st.plotly_chart(fig_weekly)
+
+# Check if there's any data to display
+if weekly_counts['Inscritos'].sum() == 0:
+    st.warning("Nenhuma inscrição encontrada nas últimas 10 semanas. Verifique as datas de inscrição ou ajuste os intervalos.")
+else:
+    media_inscritos = weekly_counts['Inscritos'].mean()
+    fig_weekly = px.bar(
+        weekly_counts,
+        x='Semana',
+        y='Inscritos',
+        text='Inscritos',
+        title="Inscrições Vendidas por Semana (Últimas 10 Semanas) - 2025",
+        labels={"Semana": "Período", "Inscritos": "Quantidade de Inscrições"}
+    )
+    fig_weekly.update_traces(textposition='outside')
+    fig_weekly.add_scatter(
+        x=weekly_counts['Semana'],
+        y=[media_inscritos] * len(weekly_counts),
+        mode='lines',
+        name=f'Média: {media_inscritos:.1f}',
+        line=dict(color='orange')
+    )
+    fig_weekly.add_annotation(
+        x=weekly_counts['Semana'].iloc[-1],
+        y=media_inscritos,
+        text=f"{media_inscritos:.1f}",
+        showarrow=False,
+        yshift=10,
+        font=dict(color='orange')
+    )
+    st.plotly_chart(fig_weekly)
 
 st.subheader("Média de Inscrições por Dia da Semana")
 df_2025_dia = df_2025[df_2025['Registration date'] >= pd.to_datetime('2024-11-01')].copy()
