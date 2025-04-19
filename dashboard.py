@@ -269,6 +269,28 @@ metas = pd.DataFrame({
     "Percurso": ["FUN 7KM", "PTR 20", "PTR 35", "PTR 55", "UTSB 100", "TOTAL"],
     "Meta 2025": [900, 900, 620, 770, 310, 3500]
 })
+
+# Debug: Check for duplicates in df_2025
+st.write("Número total de linhas em df_2025:", len(df_2025))
+st.write("Número de duplicatas em df_2025:", df_2025.duplicated().sum())
+
+# Debug: Check unique competitions and years
+st.write("Competições únicas em df_2025:", df_2025["Competition"].unique())
+st.write("Anos únicos em df_2025:", df_2025["Ano"].unique())
+
+# Calculate total inscriptions per competition
+inscricoes_por_percurso_all = df_2025.groupby("Competition").size()
+st.write("Inscrições por competição (antes de reindex):", inscricoes_por_percurso_all.to_dict())
+
+# Exclude "Kids" explicitly and reindex
+inscricoes_por_percurso = inscricoes_por_percurso_all.drop("Kids", errors="ignore").reindex(
+    ["FUN 7KM", "PTR 20", "PTR 35", "PTR 55", "UTSB 100"], fill_value=0
+)
+total_inscricoes = inscricoes_por_percurso.sum()
+inscricoes_por_percurso = pd.concat([inscricoes_por_percurso, pd.Series([total_inscricoes], index=["TOTAL"])])
+meta_2025["Inscritos"] = inscricoes_por_percurso.values
+
+st.write(meta_2025)
 inscritos_2025 = df_2025['Competition'].value_counts().reset_index()
 inscritos_2025.columns = ['Percurso', 'Inscritos']
 inscritos_2025['Percurso'] = inscritos_2025['Percurso'].str.upper().str.strip()
