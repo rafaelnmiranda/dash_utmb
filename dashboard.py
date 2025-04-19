@@ -14,6 +14,7 @@ import pdfkit
 from matplotlib_venn import venn3
 import matplotlib.pyplot as plt
 import os
+from datetime import date
 
 st.set_page_config(layout="wide")
 
@@ -176,6 +177,9 @@ if dfs_2025:
     df_total = preprocess_data([df_2023, df_2024] + dfs_2025, ibge_df, taxa_cambio=5.5)
     df_2025 = df_total[df_total['Ano'] == 2025]
     data_base = df_2025['Registration date'].max().date()
+    if not isinstance(data_base, date):  # Handle NaT or invalid date
+        st.error("Erro: Data base inválida. Verifique os dados de 'Registration date' em 2025.")
+        st.stop()
 else:
     st.error("Por favor, faça o upload dos arquivos de 2025.")
     st.stop()
@@ -206,7 +210,7 @@ st.markdown(
 @st.cache_resource(show_spinner=False)
 def export_to_pdf(_data_base):
     try:
-        public_url = "https://your-streamlit-app-url"  # Replace with actual URL
+        public_url = "https://your-streamlit-app-url"  # Replace with actual URL, e.g., https://share.streamlit.app/your-org/your-repo
         config = pdfkit.configuration()
         if not os.path.exists(config.wkhtmltopdf.decode('utf-8')):
             config = pdfkit.configuration(wkhtmltopdf="/usr/bin/wkhtmltopdf")
@@ -279,9 +283,9 @@ st.table(metas_df)
 st.subheader("Prazo Decorrido vs. Meta")
 start_date = pd.Timestamp("2024-10-28")
 end_date = pd.Timestamp("2025-08-15")
-data_base = min(data_base, end_date)
+data_base = min(data_base, end_date.date())  # Convert end_date to datetime.date
 total_period = (end_date - start_date).days
-days_elapsed = (data_base - start_date).days
+days_elapsed = (data_base - start_date.date()).days
 prazo_percent = (days_elapsed / total_period) * 100
 col_p, col_m = st.columns(2)
 col_p.metric("Prazo Decorrido (%)", format_percentage(prazo_percent))
