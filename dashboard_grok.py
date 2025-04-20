@@ -298,6 +298,37 @@ metas_df["Meta 2025"] = metas_df["Meta 2025"].apply(format_integer)
 metas_df["% da Meta"] = ((metas_df["Inscritos"].astype(float) / metas_df["Meta 2025"].astype(float)) * 100).fillna(0).apply(format_percentage)
 st.table(metas_df)
 
+
+# ─── Debug: detalhes dos inscritos FUN 7KM ───
+# 1) Filtra apenas FUN 7KM
+df_debug_7km = df_2025[
+    df_2025['Competition']
+        .str.upper()
+        .str.strip() 
+    == 'FUN 7KM'
+].copy()
+
+# 2) Seleciona apenas Nome, Email e Data de Inscrição
+df_debug_7km = df_debug_7km[[
+    'Name',             # ajuste se o seu campo tiver outro nome, ex: 'Full Name'
+    'Email',
+    'Registration date'
+]]
+
+# 3) Exibe no Streamlit
+st.subheader("🔍 Debug – Inscritos FUN 7KM (Nome, Email e Data)")
+st.dataframe(df_debug_7km)  # permite scroll caso a lista seja longa
+
+# 4) (Opcional) Botão para baixar CSV
+csv_7km = df_debug_7km.to_csv(index=False).encode('utf-8')
+st.download_button(
+    label="📥 Baixar lista FUN 7KM (CSV)",
+    data=csv_7km,
+    file_name="inscritos_fun7km_debug.csv",
+    mime="text/csv"
+)
+
+
 st.subheader("Prazo Decorrido vs. Meta")
 start_date = pd.Timestamp("2024-10-28")
 end_date = pd.Timestamp("2025-08-15")
