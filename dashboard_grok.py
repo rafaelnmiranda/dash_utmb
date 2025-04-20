@@ -263,6 +263,7 @@ if st.button("Baixar PDF"):
         st.error("Erro ao gerar PDF com wkhtmltopdf. Use a opção de impressão do navegador.")
         st.markdown('<button onclick="window.print()">Imprimir</button>', unsafe_allow_html=True)
 
+
 # Subsection: Cabeçalho e KPIs
 st.markdown(f'<p class="titulo">Dashboard de Inscrições – Paraty Brazil by UTMB (até {data_base:%d/%m/%Y})</p>', unsafe_allow_html=True)
 total_inscritos_2025 = df_2025.shape[0]
@@ -271,13 +272,26 @@ num_mulheres = df_2025['Gender'].str.strip().str.upper().isin(['F', 'FEMALE']).s
 perc_mulheres = (num_mulheres / total_inscritos_2025 * 100) if total_inscritos_2025 else 0
 meta_total = 3500
 meta_progress = (total_inscritos_2025 / meta_total) * 100
-col1, col2, col3, col4 = st.columns(4)
-col1.metric("Total Inscritos 2025", format_integer(total_inscritos_2025))
-col2.metric("% Meta", format_percentage(meta_progress))
+
+# Calcular % de Estrangeiros
+if 'Nationality' in df_2025.columns:
+    df_2025_nat = df_2025.copy()
+    df_2025_nat['Nationality_std'] = df_2025_nat['Nationality'].dropna().apply(standardize_nationality)
+    num_estrangeiros = df_2025_nat[df_2025_nat['Nationality_std'] != 'BR'].shape[0]
+    perc_estrangeiros = (num_estrangeiros / total_inscritos_2025 * 100) if total_inscritos_2025 else 0
+else:
+    perc_estrangeiros = 0  # Caso a coluna 'Nationality' não exista
+
+# Exibir métricas lado a lado (agora com 5 colunas)
+col1, col2, col3, col4, col5 = st.columns(5)
+col1.metric("Total Inscritos", format_integer(total_inscritos_2025))
+col2.metric("Países Diferentes", format_integer(num_paises_2025))
 col3.metric("% Mulheres", format_percentage(perc_mulheres))
-col4.metric("Países Diferentes", format_integer(num_paises_2025))
+col4.metric("% Meta", format_percentage(meta_progress))
+col5.metric("% de Estrangeiros", format_percentage(perc_estrangeiros))  # Nova métrica
 st.divider()
-#page_break()
+page_break()
+
 
 # Subsection: Progressos e Projeções 2025
 st.header("Progressos e Projeções 2025")
