@@ -290,8 +290,6 @@ col3.metric("% Mulheres", format_percentage(perc_mulheres))
 col4.metric("% de Estrangeiros", format_percentage(perc_estrangeiros))  # Nova métrica
 col5.metric("Países Diferentes", format_integer(num_paises_2025))
 st.divider()
-page_break()
-
 
 # Subsection: Progressos e Projeções 2025
 st.header("Progressos e Projeções 2025")
