@@ -509,15 +509,17 @@ with st.expander("Participação por Ano"):
     return_rate = (len(returning_athletes) / total_athletes_2025 * 100) if total_athletes_2025 > 0 else 0
     st.metric("Taxa de Retorno (%)", format_percentage(return_rate))
     
-    plt.figure(figsize=(4, 4))
-    set_2023_count = len(set_2023)
-    set_2024_count = len(set_2024)
-    set_2025_count = len(set_2025)
-    total_unique = len(set_2023.union(set_2024).union(set_2025))
-    venn3([set_2023, set_2024, set_2025],
-          set_labels=(f"2023 ({set_2023_count})", f"2024 ({set_2024_count})", f"2025 ({set_2025_count})"))
-    plt.title(f"Participação dos Atletas por Ano (TOTAL: {total_unique})")
-    st.pyplot(plt)
+    col1, col2, col3 = st.columns([1, 1, 1])  # Cria 3 colunas, com a do meio ocupando 1/3 da largura
+    with col2:  # Coloca o gráfico na coluna central
+        plt.figure(figsize=(4, 4))  # Tamanho reduzido
+        set_2023_count = len(set_2023)
+        set_2024_count = len(set_2024)
+        set_2025_count = len(set_2025)
+        total_unique = len(set_2023.union(set_2024).union(set_2025))
+        venn3([set_2023, set_2024, set_2025],
+              set_labels=(f"2023 ({set_2023_count})", f"2024 ({set_2024_count})", f"2025 ({set_2025_count})"))
+        plt.title(f"Participação dos Atletas por Ano (TOTAL: {total_unique})")
+        st.pyplot(plt)
 st.divider()
 page_break()
 
