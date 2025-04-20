@@ -1,6 +1,3 @@
-# ─── Configurações Iniciais ───
-# Section: Configuração do Streamlit
-# Configura layout amplo e aplica estilos de impressão.
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -19,7 +16,6 @@ from datetime import date
 st.set_page_config(layout="wide")
 
 # Subsection: Estilos de Impressão
-# Define CSS para impressão em PDF, garantindo margens, números de página e layout consistente.
 def apply_print_css():
     st.markdown("""
     <style>
@@ -43,21 +39,17 @@ def apply_print_css():
 apply_print_css()
 
 # Subsection: Quebra de Página
-# Insere quebras de página para PDF.
 def page_break():
     st.markdown('<div style="page-break-after: always;"></div>', unsafe_allow_html=True)
 
 # ─── Funções Auxiliares ───
-# Section: Funções Auxiliares
 # Subsection: Normalização de Texto
-# Remove acentos, pontuação e normaliza caixa para matching.
 def norm_text(text):
     t = unicodedata.normalize('NFKD', str(text))
     t = ''.join(c for c in t if not unicodedata.combining(c))
     return re.sub(r'[^a-z0-9\s]', '', t.lower().strip())
 
 # Subsection: Formatação
-# Formata valores para exibição.
 def format_currency(val):
     try:
         return f"R$ {float(val):,.0f}".replace(",", ".")
@@ -83,7 +75,6 @@ def format_integer_thousands(val):
         return val
 
 # Subsection: Padronização de Nacionalidade
-# Padroniza nomes de nacionalidades para contagem única.
 def standardize_nationality(value):
     if pd.isnull(value):
         return value
@@ -91,10 +82,30 @@ def standardize_nationality(value):
     mapping = {"BRASIL": "BR", "BRAZIL": "BR"}
     return mapping.get(value, value)
 
+# Subsection: Padronização de Competição
+def standardize_competition(value):
+    if pd.isnull(value):
+        return value
+    competition_mapping = {
+        "UTSB 110": "UTSB 100",
+        "UTSB 100 (108km)": "UTSB 100",
+        "PTR 55 (58km)": "PTR 55",
+        "PTR 35 (34km)": "PTR 35",
+        "PTR 20 (25km)": "PTR 20",
+        "Fun 7km": "FUN 7KM",
+        "FUN 7KM": "FUN 7KM",
+        "PTR20": "PTR 20",
+        "PTR35": "PTR 35",
+        "PTR55": "PTR 55",
+        "Kids": "KIDS",
+        "Kids Race": "KIDS",
+        "KIDS_EVENT": "KIDS"
+    }
+    value = str(value).strip().upper()
+    return competition_mapping.get(value, value)
+
 # ─── Carregamento de Dados ───
-# Section: Carregamento de Dados
 # Subsection: Municípios IBGE
-# Carrega lista de municípios do IBGE de uma URL remota.
 @st.cache_data(show_spinner=False)
 def load_ibge_municipios():
     IBGE_URL = (
@@ -104,10 +115,12 @@ def load_ibge_municipios():
     resp = requests.get(IBGE_URL, timeout=10)
     df = pd.read_excel(BytesIO(resp.content), engine='openpyxl')
     df['City_norm'] = df['City'].apply(norm_text)
+    # Deduplicate cities to prevent merge inflation
+    df = df.drop_duplicates(subset=['City_norm'], keep='first')
+    st.write(f"Loaded IBGE municipalities: {len(df)} unique cities after deduplication.")
     return df
 
 # Subsection: Correção de Cidade
-# Corrige nomes de cidades via fuzzy matching com IBGE.
 def correct_city(city, ibge_df, cutoff=0.8):
     city_choices = ibge_df['City_norm'].tolist()
     norm = norm_text(city)
@@ -117,7 +130,6 @@ def correct_city(city, ibge_df, cutoff=0.8):
     return city
 
 # Subsection: Dados Estáticos
-# Carrega dados de 2023 e 2024 de URLs remotas.
 @st.cache_data(show_spinner=False)
 def load_static_data(ano, url):
     response = requests.get(url)
@@ -128,15 +140,17 @@ def load_static_data(ano, url):
     return df
 
 # Subsection: Pré-processamento
-# Limpa e enriquece dados de todos os anos.
 @st.cache_data(show_spinner=False)
 def preprocess_data(dfs, ibge_df, taxa_cambio=5.5):
     processed_dfs = []
     for df in dfs:
         df = df.copy()
+        st.write(f"Initial rows for year {df['Ano'].iloc[0]}: {len(df)}")
+        
         df['Registration date'] = pd.to_datetime(df['Registration date'], errors='coerce')
         df['City'] = df['City'].astype(str).apply(lambda x: correct_city(x, ibge_df))
         df['Nationality'] = df['Nationality'].apply(standardize_nationality)
+        
         if 'Registration amount' in df.columns:
             df['Registration amount'] = pd.to_numeric(df['Registration amount'], errors='coerce')
             if df['Moeda'].iloc[0] == 'USD':
@@ -145,13 +159,18 @@ def preprocess_data(dfs, ibge_df, taxa_cambio=5.5):
             df['Discounts amount'] = pd.to_numeric(df['Discounts amount'], errors='coerce')
             if df['Moeda'].iloc[0] == 'USD':
                 df['Discounts amount'] *= taxa_cambio
-        df = df.merge(ibge_df[['City', 'UF', 'Região']], on='City', how='left')
+        
+        # Standardize Competition before exclusion
+        df['Competition'] = df['Competition'].apply(standardize_competition)
+        
+        # Exclude KIDS before any further processing
         df = df[~df['Competition'].str.contains("KIDS", na=False, case=False)]
+        st.write(f"Rows after excluding KIDS for year {df['Ano'].iloc[0]}: {len(df)}")
+        
         processed_dfs.append(df)
     return pd.concat(processed_dfs, ignore_index=True)
 
 # ─── Carregamento e Upload de Dados ───
-# Section: Carregamento de Dados
 with st.spinner("🔄 Carregando dados..."):
     ibge_df = load_ibge_municipios()
     url_2023 = "https://github.com/rafaelnmiranda/dash_utmb/raw/815dda1e46bf0b731212e12a365ad169dc4d4e23/UTMB%20-%202023%20-%20USD.xlsx"
@@ -177,7 +196,7 @@ if dfs_2025:
     df_total = preprocess_data([df_2023, df_2024] + dfs_2025, ibge_df, taxa_cambio=5.5)
     df_2025 = df_total[df_total['Ano'] == 2025]
     data_base = df_2025['Registration date'].max().date()
-    if not isinstance(data_base, date):  # Handle NaT or invalid date
+    if not isinstance(data_base, date):
         st.error("Erro: Data base inválida. Verifique os dados de 'Registration date' em 2025.")
         st.stop()
 else:
@@ -185,7 +204,6 @@ else:
     st.stop()
 
 # ─── Dashboard ───
-# Section: Dashboard
 # Subsection: Estilos Visuais
 st.markdown(
     """
@@ -210,7 +228,7 @@ st.markdown(
 @st.cache_resource(show_spinner=False)
 def export_to_pdf(_data_base):
     try:
-        public_url = "https://your-streamlit-app-url"  # Replace with actual URL, e.g., https://share.streamlit.app/your-org/your-repo
+        public_url = "https://your-streamlit-app-url"
         config = pdfkit.configuration()
         if not os.path.exists(config.wkhtmltopdf.decode('utf-8')):
             config = pdfkit.configuration(wkhtmltopdf="/usr/bin/wkhtmltopdf")
@@ -232,7 +250,6 @@ def export_to_pdf(_data_base):
     except Exception:
         return None
 
-# Botão para gerar e baixar PDF
 if st.button("Baixar PDF"):
     pdf_bytes = export_to_pdf(data_base)
     if pdf_bytes:
@@ -284,7 +301,7 @@ st.table(metas_df)
 st.subheader("Prazo Decorrido vs. Meta")
 start_date = pd.Timestamp("2024-10-28")
 end_date = pd.Timestamp("2025-08-15")
-data_base = min(data_base, end_date.date())  # Convert end_date to datetime.date
+data_base = min(data_base, end_date.date())
 total_period = (end_date - start_date).days
 days_elapsed = (data_base - start_date.date()).days
 prazo_percent = (days_elapsed / total_period) * 100
@@ -363,8 +380,9 @@ with st.expander("Top 10 Cidades"):
     st.table(top_cidades)
 
 with st.expander("Inscritos por Estado"):
+    df_br_2025_with_uf = df_br_2025.merge(ibge_df[['City', 'UF']], on='City', how='left')
     all_ufs = sorted(ibge_df['UF'].dropna().unique())
-    uf_counts = df_br_2025['UF'].value_counts().reindex(all_ufs, fill_value=0)
+    uf_counts = df_br_2025_with_uf['UF'].value_counts().reindex(all_ufs, fill_value=0)
     uf_df = uf_counts.reset_index()
     uf_df.columns = ['UF', 'Inscritos']
     uf_df['% do Total'] = (uf_df['Inscritos'] / total_atletas * 100).round(2).astype(str) + '%'
@@ -374,8 +392,9 @@ with st.expander("Inscritos por Estado"):
     st.table(uf_df)
 
 with st.expander("Inscritos por Região"):
+    df_br_2025_with_reg = df_br_2025.merge(ibge_df[['City', 'Região']], on='City', how='left')
     all_regs = sorted(ibge_df['Região'].dropna().unique())
-    reg_counts = df_br_2025['Região'].value_counts().reindex(all_regs, fill_value=0)
+    reg_counts = df_br_2025_with_reg['Região'].value_counts().reindex(all_regs, fill_value=0)
     reg_df = reg_counts.reset_index()
     reg_df.columns = ['Região', 'Inscritos']
     reg_df['% do Total'] = (reg_df['Inscritos'] / total_atletas * 100).round(2).astype(str) + '%'
@@ -424,13 +443,16 @@ with st.expander("Comparativos Locais"):
     st.table(df_cmp_cidades)
     
     st.subheader("Estados")
-    ufs = df_br_2025['UF'].dropna().unique()
-    cnt25 = df_br_2025['UF'].value_counts().reindex(ufs, fill_value=0)
+    df_uf23 = df_br_2023.merge(ibge_df[['City', 'UF']], on='City', how='left')
+    df_uf24 = df_br_2024.merge(ibge_df[['City', 'UF']], on='City', how='left')
+    df_uf25 = df_br_2025.merge(ibge_df[['City', 'UF']], on='City', how='left')
+    ufs = df_uf25['UF'].dropna().unique()
+    cnt25 = df_uf25['UF'].value_counts().reindex(ufs, fill_value=0)
     df_cmp_uf = pd.DataFrame({'UF': cnt25.index, 'Inscritos': cnt25.values})
     df_cmp_uf['%'] = (df_cmp_uf['Inscritos'] / tot25 * 100).round(2).astype(str) + '%'
     for ano, df_ano, col_c, col_p, tot in [
-        (2023, df_br_2023, 'Inscritos 2023', '% 2023', tot23),
-        (2024, df_br_2024, 'Inscritos 2024', '% 2024', tot24),
+        (2023, df_uf23, 'Inscritos 2023', '% 2023', tot23),
+        (2024, df_uf24, 'Inscritos 2024', '% 2024', tot24),
     ]:
         cnt = df_ano['UF'].value_counts().reindex(df_cmp_uf['UF'], fill_value=0)
         df_cmp_uf[col_c] = cnt.values
@@ -439,13 +461,16 @@ with st.expander("Comparativos Locais"):
     st.table(df_cmp_uf)
     
     st.subheader("Regiões")
-    regs = df_br_2025['Região'].dropna().unique()
-    r25 = df_br_2025['Região'].value_counts().reindex(regs, fill_value=0)
+    df_reg23 = df_br_2023.merge(ibge_df[['City', 'Região']], on='City', how='left')
+    df_reg24 = df_br_2024.merge(ibge_df[['City', 'Região']], on='City', how='left')
+    df_reg25 = df_br_2025.merge(ibge_df[['City', 'Região']], on='City', how='left')
+    regs = df_reg25['Região'].dropna().unique()
+    r25 = df_reg25['Região'].value_counts().reindex(regs, fill_value=0)
     df_cmp_reg = pd.DataFrame({'Região': r25.index, 'Inscritos': r25.values})
     df_cmp_reg['%'] = (df_cmp_reg['Inscritos'] / tot25 * 100).round(2).astype(str) + '%'
     for ano, df_ano, col_c, col_p, tot in [
-        (2023, df_br_2023, 'Inscritos 2023', '% 2023', tot23),
-        (2024, df_br_2024, 'Inscritos 2024', '% 2024', tot24),
+        (2023, df_reg23, 'Inscritos 2023', '% 2023', tot23),
+        (2024, df_reg24, 'Inscritos 2024', '% 2024', tot24),
     ]:
         cnt = df_ano['Região'].value_counts().reindex(df_cmp_reg['Região'], fill_value=0)
         df_cmp_reg[col_c] = cnt.values
@@ -495,20 +520,17 @@ df_2025_acc = df_2025.copy()
 df_2025_acc['Date'] = pd.to_datetime(df_2025_acc['Registration date'].dt.date)
 df_2025_acc = df_2025_acc.sort_values('Date')
 
-# Get the last date and ensure it's valid
 last_date = df_2025_acc['Date'].max()
 if pd.isna(last_date):
     st.error("Nenhuma data de inscrição válida encontrada para 2025. Verifique os dados.")
     st.stop()
 
-# Calculate intervals: Use the original method with 1-day shift
 intervals = []
 for i in range(10):
     end = last_date - pd.Timedelta(days=1) - pd.Timedelta(days=7 * i)
     start = end - pd.Timedelta(days=6)
     intervals.append((start, end))
 
-# Count registrations per interval
 data = []
 for start, end in intervals:
     cnt = df_2025_acc[(df_2025_acc['Date'] >= start) & (df_2025_acc['Date'] <= end)].shape[0]
@@ -517,11 +539,9 @@ for start, end in intervals:
 
 weekly_counts = pd.DataFrame(data)[::-1].reset_index(drop=True)
 
-# Display a warning if no inscriptions are found, but still render the chart
 if weekly_counts['Inscritos'].sum() == 0:
     st.warning("Nenhuma inscrição encontrada nas últimas 10 semanas.")
 
-# Render the chart
 media_inscritos = weekly_counts['Inscritos'].mean()
 fig_weekly = px.bar(
     weekly_counts,
