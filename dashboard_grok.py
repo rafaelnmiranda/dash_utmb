@@ -145,7 +145,7 @@ def preprocess_data(dfs, ibge_df, taxa_cambio=5.5):
     processed_dfs = []
     for df in dfs:
         df = df.copy()
-        st.write(f"Initial rows for year {df['Ano'].iloc[0]}: {len(df)}")
+        #st.write(f"Initial rows for year {df['Ano'].iloc[0]}: {len(df)}")
         
         df['Registration date'] = pd.to_datetime(df['Registration date'], errors='coerce')
         df['City'] = df['City'].astype(str).apply(lambda x: correct_city(x, ibge_df))
@@ -165,7 +165,7 @@ def preprocess_data(dfs, ibge_df, taxa_cambio=5.5):
         
         # Exclude KIDS before any further processing
         df = df[~df['Competition'].str.contains("KIDS", na=False, case=False)]
-        st.write(f"Rows after excluding KIDS for year {df['Ano'].iloc[0]}: {len(df)}")
+        #st.write(f"Rows after excluding KIDS for year {df['Ano'].iloc[0]}: {len(df)}")
         
         processed_dfs.append(df)
     return pd.concat(processed_dfs, ignore_index=True)
@@ -297,30 +297,6 @@ metas_df["Inscritos"] = metas_df["Inscritos"].apply(format_integer)
 metas_df["Meta 2025"] = metas_df["Meta 2025"].apply(format_integer)
 metas_df["% da Meta"] = ((metas_df["Inscritos"].astype(float) / metas_df["Meta 2025"].astype(float)) * 100).fillna(0).apply(format_percentage)
 st.table(metas_df)
-
-
-# ─── Debug: lista completa de inscritos FUN 7KM ───
-# 1) Filtra apenas FUN 7KM
-df_debug_7km = df_2025[
-    df_2025['Competition']
-        .str.upper()
-        .str.strip() 
-    == 'FUN 7KM'
-].copy()
-
-# 2) Exibe todas as colunas
-st.subheader("🔍 Debug – Inscritos FUN 7KM (todas as colunas)")
-st.dataframe(df_debug_7km)  # tabela scrollável com todos os detalhes
-
-# 3) Botão para baixar CSV completo
-csv_7km = df_debug_7km.to_csv(index=False).encode('utf-8')
-st.download_button(
-    label="📥 Baixar lista FUN 7KM (CSV)",
-    data=csv_7km,
-    file_name="inscritos_fun7km_debug.csv",
-    mime="text/csv"
-)
-
 
 
 st.subheader("Prazo Decorrido vs. Meta")
