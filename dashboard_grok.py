@@ -272,12 +272,12 @@ perc_mulheres = (num_mulheres / total_inscritos_2025 * 100) if total_inscritos_2
 meta_total = 3500
 meta_progress = (total_inscritos_2025 / meta_total) * 100
 col1, col2, col3, col4 = st.columns(4)
-col1.metric("Total Inscritos", format_integer(total_inscritos_2025))
-col2.metric("Países Diferentes", format_integer(num_paises_2025))
+col1.metric("Total Inscritos 2025", format_integer(total_inscritos_2025))
+col2.metric("% Meta", format_percentage(meta_progress))
 col3.metric("% Mulheres", format_percentage(perc_mulheres))
-col4.metric("% Meta", format_percentage(meta_progress))
+col4.metric("Países Diferentes", format_integer(num_paises_2025))
 st.divider()
-page_break()
+#page_break()
 
 # Subsection: Progressos e Projeções 2025
 st.header("Progressos e Projeções 2025")
@@ -501,6 +501,13 @@ with st.expander("Participação por Ano"):
     })
     participation['Quantidade'] = participation['Quantidade'].apply(format_integer)
     st.table(participation)
+
+    # Nova métrica: Taxa de Retorno
+    previous_years = set_2023.union(set_2024)  # Atletas que correram em 2023 ou 2024
+    returning_athletes = set_2025.intersection(previous_years)  # Atletas de 2025 que correram antes
+    total_athletes_2025 = len(set_2025)
+    return_rate = (len(returning_athletes) / total_athletes_2025 * 100) if total_athletes_2025 > 0 else 0
+    st.metric("Taxa de Retorno (%)", format_percentage(return_rate))
     
     plt.figure(figsize=(6, 6))
     set_2023_count = len(set_2023)
