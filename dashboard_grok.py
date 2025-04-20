@@ -285,10 +285,10 @@ else:
 # Exibir métricas lado a lado (agora com 5 colunas)
 col1, col2, col3, col4, col5 = st.columns(5)
 col1.metric("Total Inscritos", format_integer(total_inscritos_2025))
-col2.metric("Países Diferentes", format_integer(num_paises_2025))
+col2.metric("% Meta", format_percentage(meta_progress))
 col3.metric("% Mulheres", format_percentage(perc_mulheres))
-col4.metric("% Meta", format_percentage(meta_progress))
-col5.metric("% de Estrangeiros", format_percentage(perc_estrangeiros))  # Nova métrica
+col4.metric("% de Estrangeiros", format_percentage(perc_estrangeiros))  # Nova métrica
+col5.metric("Países Diferentes", format_integer(num_paises_2025))
 st.divider()
 page_break()
 
