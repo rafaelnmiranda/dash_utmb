@@ -509,7 +509,7 @@ with st.expander("Participação por Ano"):
     return_rate = (len(returning_athletes) / total_athletes_2025 * 100) if total_athletes_2025 > 0 else 0
     st.metric("Taxa de Retorno (%)", format_percentage(return_rate))
     
-    plt.figure(figsize=(6, 6))
+    plt.figure(figsize=(4, 4))
     set_2023_count = len(set_2023)
     set_2024_count = len(set_2024)
     set_2025_count = len(set_2025)
