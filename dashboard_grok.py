@@ -296,6 +296,13 @@ metas_df = metas.merge(inscritos_2025, on="Percurso", how="left").fillna(0)
 metas_df["Inscritos"] = metas_df["Inscritos"].apply(format_integer)
 metas_df["Meta 2025"] = metas_df["Meta 2025"].apply(format_integer)
 metas_df["% da Meta"] = ((metas_df["Inscritos"].astype(float) / metas_df["Meta 2025"].astype(float)) * 100).fillna(0).apply(format_percentage)
+# Lista com a ordem desejada
+colunas = ["Percurso", "Inscritos", "Meta 2025", "% da Meta"]
+
+# Reindexa o DataFrame
+metas_df = metas_df[colunas]
+
+# Exibe a tabela com a nova ordem
 st.table(metas_df)
 
 
