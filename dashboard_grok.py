@@ -263,48 +263,6 @@ if st.button("Baixar PDF"):
         st.error("Erro ao gerar PDF com wkhtmltopdf. Use a opção de impressão do navegador.")
         st.markdown('<button onclick="window.print()">Imprimir</button>', unsafe_allow_html=True)
 
-
-# Adicionar botão de exportação para JSON no início do dashboard
-if st.button("Exportar JSON"):
-    dashboard_data = {
-        "Total_Inscritos_2025": format_integer(total_inscritos_2025),
-        "Percentual_Meta": format_percentage(meta_progress),
-        "Percentual_Mulheres": format_percentage(perc_mulheres),
-        "Percentual_Estrangeiros": format_percentage(perc_estrangeiros),
-        "Paises_Diferentes": format_integer(num_paises_2025),
-        "Metas_por_Percurso": metas_df.to_dict(orient="records"),
-        "Prazo_Decorrido": format_percentage(prazo_percent),
-        "Meta_Alcancada": format_percentage(meta_progress),
-        "Projecoes_Inscritos": projection_df.to_dict(orient="records"),
-        "Idade_Media": format_integer(mean_age),
-        "Idade_por_Competicao": age_by_competition.to_dict(orient="records"),
-        "Total_Municipios_Brasil": format_integer(num_cidades),
-        "Total_Atletas_Brasil": format_integer(total_atletas),
-        "Top_10_Cidades": top_cidades.to_dict(orient="records"),
-        "Inscritos_por_Estado": uf_df.to_dict(orient="records"),
-        "Inscritos_por_Regiao": reg_df.to_dict(orient="records"),
-        "Top_10_Paises_Estrangeiros": df_top[['País', 'Inscritos', '%']].to_dict(orient="records"),
-        "Comparativo_Cidades": df_cmp_cidades.to_dict(orient="records"),
-        "Comparativo_Estados": df_cmp_uf.to_dict(orient="records"),
-        "Comparativo_Regioes": df_cmp_reg.to_dict(orient="records"),
-        "Participacao_por_Ano": participation.to_dict(orient="records"),
-        "Taxa_Retorno": format_percentage(return_rate),
-        "Inscricoes_por_Semana": weekly_counts.to_dict(orient="records"),
-        "Media_Inscricoes_Dia_Semana": weekday_avg[['Dia da Semana', 'Media Inscritos']].to_dict(orient="records"),
-        "Top_15_Dias_Venda": top15.to_dict(orient="records"),
-        "Receita_Bruta": format_currency(receita_bruta),
-        "Receita_Liquida": format_currency(receita_liquida),
-        "Total_Inscritos_Unicos": format_integer(total_inscritos_fin),
-        "Cupom_Desconto": coupon_summary.to_dict(orient="records"),
-        "Receitas_por_Competicao": revenue_by_competition.to_dict(orient="records")
-    }
-    json_str = pd.io.json.dumps(dashboard_data, ensure_ascii=False, indent=2)
-    st.download_button(
-        label="Baixar JSON",
-        data=json_str,
-        file_name=f"dashboard_utmb_{data_base:%Y%m%d}.json",
-        mime="application/json"
-    )
     
 # Subsection: Cabeçalho e KPIs
 st.markdown(f'<p class="titulo">Dashboard de Inscrições – Paraty Brazil by UTMB (até {data_base:%d/%m/%Y})</p>', unsafe_allow_html=True)
@@ -726,5 +684,47 @@ with st.expander("Detalhamento Financeiro"):
         revenue_by_competition[col] = revenue_by_competition[col].apply(lambda x: f"{int(round(x)):,}".replace(',', '.'))
     st.table(revenue_by_competition)
 st.divider()
+
+# Adicionar botão de exportação para JSON no início do dashboard
+if st.button("Exportar JSON"):
+    dashboard_data = {
+        "Total_Inscritos_2025": format_integer(total_inscritos_2025),
+        "Percentual_Meta": format_percentage(meta_progress),
+        "Percentual_Mulheres": format_percentage(perc_mulheres),
+        "Percentual_Estrangeiros": format_percentage(perc_estrangeiros),
+        "Paises_Diferentes": format_integer(num_paises_2025),
+        "Metas_por_Percurso": metas_df.to_dict(orient="records"),
+        "Prazo_Decorrido": format_percentage(prazo_percent),
+        "Meta_Alcancada": format_percentage(meta_progress),
+        "Projecoes_Inscritos": projection_df.to_dict(orient="records"),
+        "Idade_Media": format_integer(mean_age),
+        "Idade_por_Competicao": age_by_competition.to_dict(orient="records"),
+        "Total_Municipios_Brasil": format_integer(num_cidades),
+        "Total_Atletas_Brasil": format_integer(total_atletas),
+        "Top_10_Cidades": top_cidades.to_dict(orient="records"),
+        "Inscritos_por_Estado": uf_df.to_dict(orient="records"),
+        "Inscritos_por_Regiao": reg_df.to_dict(orient="records"),
+        "Top_10_Paises_Estrangeiros": df_top[['País', 'Inscritos', '%']].to_dict(orient="records"),
+        "Comparativo_Cidades": df_cmp_cidades.to_dict(orient="records"),
+        "Comparativo_Estados": df_cmp_uf.to_dict(orient="records"),
+        "Comparativo_Regioes": df_cmp_reg.to_dict(orient="records"),
+        "Participacao_por_Ano": participation.to_dict(orient="records"),
+        "Taxa_Retorno": format_percentage(return_rate),
+        "Inscricoes_por_Semana": weekly_counts.to_dict(orient="records"),
+        "Media_Inscricoes_Dia_Semana": weekday_avg[['Dia da Semana', 'Media Inscritos']].to_dict(orient="records"),
+        "Top_15_Dias_Venda": top15.to_dict(orient="records"),
+        "Receita_Bruta": format_currency(receita_bruta),
+        "Receita_Liquida": format_currency(receita_liquida),
+        "Total_Inscritos_Unicos": format_integer(total_inscritos_fin),
+        "Cupom_Desconto": coupon_summary.to_dict(orient="records"),
+        "Receitas_por_Competicao": revenue_by_competition.to_dict(orient="records")
+    }
+    json_str = pd.io.json.dumps(dashboard_data, ensure_ascii=False, indent=2)
+    st.download_button(
+        label="Baixar JSON",
+        data=json_str,
+        file_name=f"dashboard_utmb_{data_base:%Y%m%d}.json",
+        mime="application/json"
+    )
 
 st.markdown("***Fim do Dashboard***")
