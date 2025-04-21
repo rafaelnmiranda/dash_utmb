@@ -6,6 +6,7 @@ import requests
 from io import BytesIO
 import unicodedata
 import re
+import json
 import difflib
 import pdfkit
 from matplotlib_venn import venn3
@@ -719,7 +720,7 @@ if st.button("Exportar JSON"):
         "Cupom_Desconto": coupon_summary.to_dict(orient="records"),
         "Receitas_por_Competicao": revenue_by_competition.to_dict(orient="records")
     }
-    json_str = pd.io.json.dumps(dashboard_data, ensure_ascii=False, indent=2)
+    json_str = json.dumps(dashboard_data, ensure_ascii=False, indent=2)
     st.download_button(
         label="Baixar JSON",
         data=json_str,
