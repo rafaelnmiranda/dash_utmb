@@ -689,11 +689,14 @@ st.divider()
 # Adicionar botão de exportação para JSON no início do dashboard
 if st.button("Exportar JSON"):
     dashboard_data = {
+        "Data_Base": data_base.strftime('%d/%m/%y'),
         "Total_Inscritos_2025": format_integer(total_inscritos_2025),
+        "Numero_Paises": format_integer(num_paises_2025),
+        "Total_Estrangeiros": format_integer(num_estrangeiros),
+        "Total_Brasileiros": format_integer(total_inscritos_2025 - num_estrangeiros),
         "Percentual_Meta": format_percentage(meta_progress),
         "Percentual_Mulheres": format_percentage(perc_mulheres),
         "Percentual_Estrangeiros": format_percentage(perc_estrangeiros),
-        "Paises_Diferentes": format_integer(num_paises_2025),
         "Metas_por_Percurso": metas_df.to_dict(orient="records"),
         "Prazo_Decorrido": format_percentage(prazo_percent),
         "Meta_Alcancada": format_percentage(meta_progress),
