@@ -200,7 +200,9 @@ if dfs_2025:
     if not isinstance(data_base, date):
         st.error("Erro: Data base inválida. Verifique os dados de 'Registration date' em 2025.")
         st.stop()
-elseòng
+else:
+    st.error("Por favor, faça o upload dos arquivos de 2025.")
+    st.stop()
 
 # ─── Dashboard ───
 # Subsection: Estilos Visuais
@@ -401,6 +403,7 @@ comp_cutoff_styled = comp_cutoff.style \
 
 st.dataframe(comp_cutoff_styled, use_container_width=True)
 
+
 st.divider()
 page_break()
 
@@ -512,7 +515,7 @@ with st.expander("Comparativos Locais"):
     df_uf25 = df_br_2025.merge(ibge_df[['City', 'UF']], on='City', how='left')
     ufs = df_uf25['UF'].dropna().unique()
     cnt25 = df_uf25['UF'].value_counts().reindex(ufs, fill_value=0)
-    df_cmp_uf = pd.DataFrame({' UF': cnt25.index, 'Inscritos': cnt25.values})
+    df_cmp_uf = pd.DataFrame({'UF': cnt25.index, 'Inscritos': cnt25.values})
     df_cmp_uf['%'] = (df_cmp_uf['Inscritos'] / tot25 * 100).round(2).astype(str) + '%'
     for ano, df_ano, col_c, col_p, tot in [
         (2023, df_uf23, 'Inscritos 2023', '% 2023', tot23),
