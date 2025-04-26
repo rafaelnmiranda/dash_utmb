@@ -200,9 +200,7 @@ if dfs_2025:
     if not isinstance(data_base, date):
         st.error("Erro: Data base inválida. Verifique os dados de 'Registration date' em 2025.")
         st.stop()
-else:
-    st.error("Por favor, faça o upload dos arquivos de 2025.")
-    st.stop()
+elseòng
 
 # ─── Dashboard ───
 # Subsection: Estilos Visuais
@@ -358,6 +356,51 @@ projection_df = pd.DataFrame({
     'Projeção Inscritos (15/08/2025)': [format_integer(proj_7), format_integer(proj_15), format_integer(proj_30)]
 })
 st.table(projection_df)
+
+# Comparativo de Inscrições até Data Base
+st.subheader(f"Comparativo de Inscrições até {data_base:%d/%m}")
+
+# Define os cutoffs para cada ano
+cutoff_dates = {
+    2023: pd.Timestamp(year=2023, month=data_base.month, day=data_base.day),
+    2024: pd.Timestamp(year=2024, month=data_base.month, day=data_base.day),
+    2025: pd.to_datetime(data_base)
+}
+
+# Monta as linhas com Ano e quantidade de inscritos até o cutoff
+comp_rows = []
+for ano, cutoff in cutoff_dates.items():
+    qtd = df_total[(df_total['Ano'] == ano) & (df_total['Registration date'] <= cutoff)].shape[0]
+    comp_rows.append({'Ano': ano, data_base.strftime('%d/%m'): qtd})
+
+comp_cutoff = pd.DataFrame(comp_rows)
+
+# Pega a quantidade de 2025 para comparação
+qtd_2025 = int(comp_cutoff.loc[comp_cutoff['Ano'] == 2025, data_base.strftime('%d/%m')])
+
+# Calcula a variação invertida em % em relação a 2025:
+# (qtd_2025 - qtd_ano) / qtd_2025 * 100
+comp_cutoff['Variação (%)'] = comp_cutoff.apply(
+    lambda row: None if row['Ano'] == 2025
+                else (qtd_2025 - row[data_base.strftime('%d/%m')]) / qtd_2025 * 100,
+    axis=1
+)
+
+# Estiliza o DataFrame para exibir no Streamlit
+comp_cutoff_styled = comp_cutoff.style \
+    .format({
+        data_base.strftime('%d/%m'): lambda x: format_integer_thousands(x),
+        'Variação (%)': lambda x: f"{x:+.2f}%".replace('.', ',') if pd.notnull(x) else ''
+    }) \
+    .applymap(
+        lambda v: "color: green" if isinstance(v, (int, float)) and v > 0
+                  else "color: red"   if isinstance(v, (int, float)) and v < 0
+                  else "",
+        subset=['Variação (%)']
+    )
+
+st.dataframe(comp_cutoff_styled, use_container_width=True)
+
 st.divider()
 page_break()
 
@@ -469,7 +512,7 @@ with st.expander("Comparativos Locais"):
     df_uf25 = df_br_2025.merge(ibge_df[['City', 'UF']], on='City', how='left')
     ufs = df_uf25['UF'].dropna().unique()
     cnt25 = df_uf25['UF'].value_counts().reindex(ufs, fill_value=0)
-    df_cmp_uf = pd.DataFrame({'UF': cnt25.index, 'Inscritos': cnt25.values})
+    df_cmp_uf = pd.DataFrame({' UF': cnt25.index, 'Inscritos': cnt25.values})
     df_cmp_uf['%'] = (df_cmp_uf['Inscritos'] / tot25 * 100).round(2).astype(str) + '%'
     for ano, df_ano, col_c, col_p, tot in [
         (2023, df_uf23, 'Inscritos 2023', '% 2023', tot23),
