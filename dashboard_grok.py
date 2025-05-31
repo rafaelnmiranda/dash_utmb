@@ -266,7 +266,7 @@ if st.button("Baixar PDF"):
 
     
 # Subsection: Cabeçalho e KPIs
-st.markdown(f'<p class="titulo">Dashboard de Inscrições – Paraty Brazil by UTMB (até {data_base:%d/%m/%Y})</p>', unsafe_allow_html=True)
+st.markdown(f'<p class="titulo">Dash de Inscrições – Paraty Brazil by UTMB (até {data_base:%d/%m/%Y})</p>', unsafe_allow_html=True)
 total_inscritos_2025 = df_2025.shape[0]
 num_paises_2025 = df_2025['Nationality'].nunique()
 num_mulheres = df_2025['Gender'].str.strip().str.upper().isin(['F', 'FEMALE']).sum()
