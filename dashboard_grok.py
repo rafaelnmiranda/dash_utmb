@@ -243,7 +243,7 @@ def export_to_pdf(_data_base):
                 "margin-bottom": "1cm",
                 "margin-left": "1cm",
                 "margin-right": "1cm",
-                "title": f"Dashboard de Inscrições – Paraty Brazil by UTMB (até {data_base:%d/%m/%Y})",
+                "title": f"Dash de Inscrições – Paraty Brazil by UTMB (até {data_base:%d/%m/%Y})",
                 "author": "Paraty Brazil by UTMB"
             }
         )
