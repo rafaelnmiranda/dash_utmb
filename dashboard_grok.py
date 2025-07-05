@@ -8,7 +8,6 @@ import unicodedata
 import re
 import json
 import difflib
-import pdfkit
 from matplotlib_venn import venn3
 import matplotlib.pyplot as plt
 import os
