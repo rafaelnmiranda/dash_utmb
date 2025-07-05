@@ -764,6 +764,28 @@ with st.expander("Detalhamento Financeiro"):
     for col in ['Receita_Bruta', 'Receita_Líquida', 'Total_Descontos']:
         revenue_by_competition[col] = revenue_by_competition[col].apply(lambda x: f"{int(round(x)):,}".replace(',', '.'))
     st.table(revenue_by_competition)
+
+# --- Tabela: Ticket Médio por Percurso ---
+st.subheader("Ticket Médio por Percurso (R$)")
+ticket_medio_df = df_financial.groupby('Competition').agg(
+    Inscritos=('Email', 'nunique'),
+    Receita_Líquida=('Registration amount', 'sum')
+).reset_index()
+ticket_medio_df['Ticket Médio (R$)'] = ticket_medio_df['Receita_Líquida'] / ticket_medio_df['Inscritos']
+ticket_medio_df['Ticket Médio (R$)'] = ticket_medio_df['Ticket Médio (R$)'].apply(lambda x: f"R$ {x:,.2f}".replace(",", "."))
+ticket_medio_df['Inscritos'] = ticket_medio_df['Inscritos'].apply(format_integer)
+ticket_medio_df['Receita_Líquida'] = ticket_medio_df['Receita_Líquida'].apply(lambda x: f"R$ {x:,.0f}".replace(",", "."))
+
+ticket_medio_global = df_financial['Registration amount'].sum() / df_financial['Email'].nunique() if df_financial['Email'].nunique() > 0 else 0
+total_row_ticket = pd.DataFrame([{
+    'Competition': 'Total',
+    'Inscritos': format_integer(df_financial['Email'].nunique()),
+    'Receita_Líquida': f"R$ {df_financial['Registration amount'].sum():,.0f}".replace(",", "."),
+    'Ticket Médio (R$)': f"R$ {ticket_medio_global:,.2f}".replace(",", ".")
+}])
+ticket_medio_df = pd.concat([ticket_medio_df, total_row_ticket], ignore_index=True)
+st.table(ticket_medio_df)
+
 st.divider()
 
 # Adicionar botão de exportação para JSON no início do dashboard
@@ -828,7 +850,9 @@ if st.button("Exportar JSON"):
         "Receita_Liquida": format_currency(receita_liquida),
         "Total_Inscritos_Unicos": format_integer(total_inscritos_fin),
         "Cupom_Desconto": coupon_summary.to_dict(orient="records"),
-        "Receitas_por_Competicao": revenue_by_competition.to_dict(orient="records")
+        "Receitas_por_Competicao": revenue_by_competition.to_dict(orient="records"),
+        "Ticket_Medio_Por_Percurso": ticket_medio_df.to_dict(orient="records"),
+        "Ticket_Medio_Global": f"R$ {ticket_medio_global:,.2f}".replace(",", "."),
     }
     json_str = json.dumps(dashboard_data, ensure_ascii=False, indent=2)
     st.download_button(
