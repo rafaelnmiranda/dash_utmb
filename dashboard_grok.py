@@ -768,6 +768,32 @@ st.divider()
 
 # Adicionar botão de exportação para JSON no início do dashboard
 if st.button("Exportar JSON"):
+    # Recriar dados necessários para o JSON
+    # Vendas diárias dos últimos 30 dias
+    df_2025_30dias_json = df_2025.copy()
+    df_2025_30dias_json['Date'] = pd.to_datetime(df_2025_30dias_json['Registration date'].dt.date)
+    last_date_30d_json = df_2025_30dias_json['Date'].max()
+    start_date_30d_json = last_date_30d_json - pd.Timedelta(days=29)
+    df_2025_30dias_json = df_2025_30dias_json[(df_2025_30dias_json['Date'] >= start_date_30d_json) & (df_2025_30dias_json['Date'] <= last_date_30d_json)]
+    daily_counts_30d_json = df_2025_30dias_json.groupby('Date').size().reset_index(name='Inscritos')
+    all_dates_json = pd.date_range(start=start_date_30d_json, end=last_date_30d_json, freq='D')
+    daily_counts_30d_complete_json = pd.DataFrame({'Date': all_dates_json})
+    daily_counts_30d_complete_json = daily_counts_30d_complete_json.merge(daily_counts_30d_json, on='Date', how='left').fillna(0)
+    daily_counts_30d_complete_json['Dia'] = daily_counts_30d_complete_json['Date'].dt.strftime('%d/%m')
+    
+    # Top 15 dias de maior venda
+    df_2025_dia_json = df_2025[df_2025['Registration date'] >= pd.to_datetime('2024-11-01')].copy()
+    df_2025_dia_json['Date'] = pd.to_datetime(df_2025_dia_json['Registration date'].dt.date)
+    daily_counts_json = df_2025_dia_json.groupby('Date').size().reset_index(name='Inscritos')
+    daily_counts_json['Weekday'] = daily_counts_json['Date'].dt.dayofweek
+    weekday_avg_json = daily_counts_json.groupby('Weekday')['Inscritos'].mean().reset_index(name='Media Inscritos')
+    weekday_names_json = {0: "Segunda", 1: "Terça", 2: "Quarta", 3: "Quinta", 4: "Sexta", 5: "Sábado", 6: "Domingo"}
+    daily_counts_json['Media_Semanadia'] = daily_counts_json['Weekday'].map(weekday_avg_json.set_index('Weekday')['Media Inscritos'])
+    daily_counts_json['%_Acima_Media'] = ((daily_counts_json['Inscritos'] - daily_counts_json['Media_Semanadia']) / daily_counts_json['Media_Semanadia'] * 100)
+    daily_counts_json['Dia (dd/mm/aa)'] = daily_counts_json['Date'].dt.strftime('%d/%m/%y') + ' (' + daily_counts_json['Weekday'].map(weekday_names_json) + ')'
+    daily_counts_json['% acima da média'] = daily_counts_json['%_Acima_Media'].round(0).astype(int).astype(str) + '%'
+    top15_json = daily_counts_json.sort_values('Inscritos', ascending=False).head(15)[['Dia (dd/mm/aa)', 'Inscritos', '% acima da média']]
+    
     dashboard_data = {
         "Data_Base": data_base.strftime('%d/%m/%y'),
         "Total_Inscritos_2025": format_integer(total_inscritos_2025),
@@ -795,9 +821,9 @@ if st.button("Exportar JSON"):
         "Participacao_por_Ano": participation.to_dict(orient="records"),
         "Taxa_Retorno": format_percentage(return_rate),
         "Inscricoes_por_Semana": weekly_counts.to_dict(orient="records"),
-        "Vendas_Diarias_30_Dias": daily_counts_30d_complete[['Dia', 'Inscritos']].to_dict(orient="records"),
+        "Vendas_Diarias_30_Dias": daily_counts_30d_complete_json[['Dia', 'Inscritos']].to_dict(orient="records"),
         "Media_Inscricoes_Dia_Semana": weekday_avg[['Dia da Semana', 'Media Inscritos']].to_dict(orient="records"),
-        "Top_15_Dias_Venda": top15.to_dict(orient="records"),
+        "Top_15_Dias_Venda": top15_json.to_dict(orient="records"),
         "Receita_Bruta": format_currency(receita_bruta),
         "Receita_Liquida": format_currency(receita_liquida),
         "Total_Inscritos_Unicos": format_integer(total_inscritos_fin),
