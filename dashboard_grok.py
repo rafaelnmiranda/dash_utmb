@@ -225,44 +225,7 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-# Subsection: Exportação para PDF
-@st.cache_resource(show_spinner=False)
-def export_to_pdf(_data_base):
-    try:
-        public_url = "https://your-streamlit-app-url"
-        config = pdfkit.configuration()
-        if not os.path.exists(config.wkhtmltopdf.decode('utf-8')):
-            config = pdfkit.configuration(wkhtmltopdf="/usr/bin/wkhtmltopdf")
-        pdf_bytes = pdfkit.from_url(
-            public_url,
-            False,
-            configuration=config,
-            options={
-                "page-size": "A4",
-                "margin-top": "1cm",
-                "margin-bottom": "1cm",
-                "margin-left": "1cm",
-                "margin-right": "1cm",
-                "title": f"Dash de Inscrições – Paraty Brazil by UTMB (até {data_base:%d/%m/%Y})",
-                "author": "Paraty Brazil by UTMB"
-            }
-        )
-        return pdf_bytes
-    except Exception:
-        return None
 
-if st.button("Baixar PDF"):
-    pdf_bytes = export_to_pdf(data_base)
-    if pdf_bytes:
-        st.download_button(
-            label="Baixar PDF",
-            data=pdf_bytes,
-            file_name="dashboard.pdf",
-            mime="application/pdf"
-        )
-    else:
-        st.error("Erro ao gerar PDF com wkhtmltopdf. Use a opção de impressão do navegador.")
-        st.markdown('<button onclick="window.print()">Imprimir</button>', unsafe_allow_html=True)
 
     
 # Subsection: Cabeçalho e KPIs
@@ -392,7 +355,7 @@ for ano, cutoff in cutoff_dates.items():
 
 comp_cutoff = pd.DataFrame(comp_rows)
 
-# Pega a quantidade de 2025 para comparação
+# Pega a quantidade de 2025 para comparação (usando a data correta)
 qtd_2025 = int(comp_cutoff.loc[comp_cutoff['Ano'] == 2025, data_base.strftime('%d/%m')])
 
 # Calcula a variação invertida em % em relação a 2025:
@@ -687,6 +650,35 @@ fig_weekly.add_annotation(
 )
 st.plotly_chart(fig_weekly)
 
+st.subheader("Vendas Diárias (Últimos 30 Dias)")
+# Dados dos últimos 30 dias
+df_2025_30dias = df_2025.copy()
+df_2025_30dias['Date'] = pd.to_datetime(df_2025_30dias['Registration date'].dt.date)
+last_date_30d = df_2025_30dias['Date'].max()
+start_date_30d = last_date_30d - pd.Timedelta(days=29)
+
+# Filtra apenas os últimos 30 dias
+df_2025_30dias = df_2025_30dias[(df_2025_30dias['Date'] >= start_date_30d) & (df_2025_30dias['Date'] <= last_date_30d)]
+daily_counts_30d = df_2025_30dias.groupby('Date').size().reset_index(name='Inscritos')
+
+# Cria todas as datas dos últimos 30 dias (incluindo dias sem vendas)
+all_dates = pd.date_range(start=start_date_30d, end=last_date_30d, freq='D')
+daily_counts_30d_complete = pd.DataFrame({'Date': all_dates})
+daily_counts_30d_complete = daily_counts_30d_complete.merge(daily_counts_30d, on='Date', how='left').fillna(0)
+daily_counts_30d_complete['Dia'] = daily_counts_30d_complete['Date'].dt.strftime('%d/%m')
+
+fig_daily_30d = px.bar(
+    daily_counts_30d_complete,
+    x='Dia',
+    y='Inscritos',
+    text='Inscritos',
+    title="Vendas Diárias - Últimos 30 Dias (2025)",
+    labels={"Dia": "Data", "Inscritos": "Quantidade de Inscrições"}
+)
+fig_daily_30d.update_traces(textposition='outside')
+fig_daily_30d.update_xaxes(tickangle=45)
+st.plotly_chart(fig_daily_30d)
+
 st.subheader("Média de Inscrições por Dia da Semana")
 df_2025_dia = df_2025[df_2025['Registration date'] >= pd.to_datetime('2024-11-01')].copy()
 df_2025_dia['Date'] = pd.to_datetime(df_2025_dia['Registration date'].dt.date)
@@ -803,6 +795,7 @@ if st.button("Exportar JSON"):
         "Participacao_por_Ano": participation.to_dict(orient="records"),
         "Taxa_Retorno": format_percentage(return_rate),
         "Inscricoes_por_Semana": weekly_counts.to_dict(orient="records"),
+        "Vendas_Diarias_30_Dias": daily_counts_30d_complete[['Dia', 'Inscritos']].to_dict(orient="records"),
         "Media_Inscricoes_Dia_Semana": weekday_avg[['Dia da Semana', 'Media Inscritos']].to_dict(orient="records"),
         "Top_15_Dias_Venda": top15.to_dict(orient="records"),
         "Receita_Bruta": format_currency(receita_bruta),
