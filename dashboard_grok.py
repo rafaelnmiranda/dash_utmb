@@ -472,6 +472,8 @@ page_break()
 
 # Subsection: Internacional
 st.header("Internacional")
+
+# Top 10 Países Estrangeiros
 with st.expander("Top 10 Países Estrangeiros"):
     df_2025['Nat_std'] = df_2025['Nationality'].apply(standardize_nationality)
     vc = df_2025[df_2025['Nat_std'] != 'BR']['Nat_std'].value_counts()
@@ -486,6 +488,31 @@ with st.expander("Top 10 Países Estrangeiros"):
         '%': '100%'
     }])
     st.table(pd.concat([df_top[['País', 'Inscritos', '%']], total_row], ignore_index=True))
+
+# Lista Completa de Todos os Países
+with st.expander("Lista Completa de Todos os Países"):
+    df_2025['Nat_std'] = df_2025['Nationality'].apply(standardize_nationality)
+    all_countries = df_2025['Nat_std'].value_counts().reset_index()
+    all_countries.columns = ['País', 'Count']
+    all_countries['Inscritos'] = all_countries['Count'].apply(format_integer)
+    all_countries['% do Total'] = (all_countries['Count'] / len(df_2025) * 100).round(2).astype(str) + '%'
+    
+    # Adiciona linha de total
+    total_row_all = pd.DataFrame([{
+        'País': 'TOTAL GERAL',
+        'Inscritos': format_integer(len(df_2025)),
+        '% do Total': '100,00%'
+    }])
+    
+    # Exibe a tabela completa
+    st.table(pd.concat([all_countries[['País', 'Inscritos', '% do Total']], total_row_all], ignore_index=True))
+    
+    # Métricas adicionais
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Total de Países", format_integer(len(all_countries)))
+    col2.metric("Países Estrangeiros", format_integer(len(all_countries[all_countries['País'] != 'BR'])))
+    col3.metric("Países com 1 Atleta", format_integer(len(all_countries[all_countries['Count'] == 1])))
+
 st.divider()
 page_break()
 
