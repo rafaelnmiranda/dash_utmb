@@ -267,6 +267,21 @@ if st.button("Baixar PDF"):
     
 # Subsection: Cabeçalho e KPIs
 st.markdown(f'<p class="titulo">Dash de Inscrições – Paraty Brazil by UTMB (até {data_base:%d/%m/%Y})</p>', unsafe_allow_html=True)
+
+# Data da última alteração do código (topo direito)
+import os
+from datetime import datetime
+
+# Pega a data de modificação do arquivo atual
+arquivo_atual = __file__
+timestamp_modificacao = os.path.getmtime(arquivo_atual)
+data_alteracao = datetime.fromtimestamp(timestamp_modificacao).strftime('%d/%m/%Y')
+
+st.markdown(
+    f'<div style="position: absolute; top: 10px; right: 20px; font-size: 12px; color: #666; font-style: italic;">'
+    f'Última atualização do código: {data_alteracao}</div>',
+    unsafe_allow_html=True
+)
 total_inscritos_2025 = df_2025.shape[0]
 num_paises_2025 = df_2025['Nationality'].nunique()
 num_mulheres = df_2025['Gender'].str.strip().str.upper().isin(['F', 'FEMALE']).sum()
