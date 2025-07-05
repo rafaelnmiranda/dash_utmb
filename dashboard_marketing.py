@@ -73,39 +73,29 @@ def consolidate_teams(teams_series, similarity_threshold=80):
     """
     Consolida nomes de assessorias esportivas por similaridade
     """
-    if teams_series.empty:
+    if teams_series.empty or teams_series.dropna().empty:
         return teams_series
-    
-    # Remove valores nulos e normaliza
     teams_clean = teams_series.dropna().astype(str).str.strip()
     teams_clean = teams_clean[teams_clean != 'nan']
-    
     if teams_clean.empty:
         return teams_series
-    
-    # Cria dicionário de mapeamento
     team_mapping = {}
     processed_teams = set()
-    
-    for team in teams_clean.unique():
+    unique_teams = teams_clean.unique()
+    for team in unique_teams:
         if team in processed_teams:
             continue
-            
-        # Encontra times similares
         similar_teams = process.extract(
-            team, 
-            teams_clean.unique(), 
-            limit=len(teams_clean.unique()),
+            team,
+            unique_teams,
+            scorer=fuzz.ratio,
+            limit=len(unique_teams),
             score_cutoff=similarity_threshold
         )
-        
-        # Agrupa times similares
-        for similar_team, score in similar_teams:
+        for similar_team, score, _ in similar_teams:
             if similar_team not in processed_teams:
                 team_mapping[similar_team] = team
                 processed_teams.add(similar_team)
-    
-    # Aplica o mapeamento
     consolidated = teams_series.map(team_mapping).fillna(teams_series)
     return consolidated
 
