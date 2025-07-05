@@ -109,6 +109,18 @@ def consolidate_teams(teams_series, similarity_threshold=80):
     consolidated = teams_series.map(team_mapping).fillna(teams_series)
     return consolidated
 
+def correct_city(city, ibge_df, cutoff=80):
+    """Corrige nome da cidade usando fuzzy matching com base IBGE"""
+    if pd.isnull(city) or city.strip() == '':
+        return city
+    norm = norm_text(city)
+    city_choices = ibge_df['City_norm'].tolist()
+    matches = process.extractOne(norm, city_choices, scorer=fuzz.ratio, score_cutoff=cutoff)
+    if matches:
+        match_norm = matches[0]
+        return ibge_df.loc[ibge_df['City_norm'] == match_norm, 'City'].iat[0]
+    return city
+
 # ─── CARREGAMENTO DE DADOS ───
 
 @st.cache_data(show_spinner=False)
@@ -153,7 +165,7 @@ def preprocess_data(dfs, ibge_df, taxa_cambio=5.5):
         df = df.copy()
         
         df['Registration date'] = pd.to_datetime(df['Registration date'], errors='coerce')
-        df['City'] = df['City'].astype(str)
+        df['City'] = df['City'].astype(str).apply(lambda x: correct_city(x, ibge_df))
         df['Nationality'] = df['Nationality'].apply(standardize_nationality)
         df['Competition'] = df['Competition'].apply(standardize_competition)
         
@@ -232,26 +244,17 @@ def calculate_nationality_metrics(df_2025):
     return brasileiros, percentual_brasileiros, estrangeiros, percentual_estrangeiros, paises_lista, paises_diferentes
 
 def calculate_brazilian_cities_metrics(df_2025, ibge_df):
-    """Calcula métricas de cidades brasileiras"""
+    """Calcula métricas de cidades brasileiras com ajuste de nomes"""
     if df_2025.empty or ibge_df.empty:
         return 0, pd.DataFrame()
-    
-    # Filtra apenas brasileiros
     df_br = df_2025[df_2025['Country'].str.lower() == 'brazil'].copy()
-    
     if df_br.empty:
         return 0, pd.DataFrame()
-    
-    # Corrige nomes das cidades
-    df_br['City'] = df_br['City'].astype(str)
-    
-    # Conta municípios únicos
+    # Corrige nomes das cidades usando base IBGE
+    df_br['City'] = df_br['City'].astype(str).apply(lambda x: correct_city(x, ibge_df))
     total_municipios = df_br['City'].nunique()
-    
-    # Top 5 cidades
     top_cidades = df_br['City'].value_counts().head(5).reset_index()
     top_cidades.columns = ['Cidade', 'Inscritos']
-    
     return total_municipios, top_cidades
 
 def calculate_teams_metrics(df_2025):
