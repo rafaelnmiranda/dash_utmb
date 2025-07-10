@@ -751,18 +751,43 @@ with st.expander("Detalhamento Financeiro"):
     grp['Receita_Líquida'] = grp['Registration amount']
     grp['Total_Descontos'] = grp['Discounts amount']
     revenue_by_competition = grp.reset_index().drop(columns=['Registration amount', 'Discounts amount'])
+
+    # --- Adiciona valores de Receita Líquida (com Cielo) para 2025 ---
+    cielo_liquida_2025 = {
+        'FUN 7KM': 4412,
+        'PTR 20': 25531,
+        'PTR 35': 33444,
+        'PTR 55': 55720,
+        'UTSB 100': 38364
+    }
+    # Atualiza a coluna para as linhas de 2025
+    def update_cielo(row):
+        comp = str(row['Competition']).strip().upper()
+        if comp in cielo_liquida_2025:
+            return f"R$ {cielo_liquida_2025[comp]:,.0f}".replace(",", ".")
+        return row['Receita_Líquida']
+    revenue_by_competition['Receita_Líquida (com Cielo)'] = revenue_by_competition.apply(update_cielo, axis=1)
+    # Remove a coluna antiga
+    revenue_by_competition = revenue_by_competition.drop(columns=['Receita_Líquida'])
+    # Atualiza o total
     total_row2 = pd.DataFrame([{
         'Competition': 'Total',
-        'Total Inscritos': revenue_by_competition['Total Inscritos'].sum(),
-        'Receita_Bruta': revenue_by_competition['Receita_Bruta'].sum(),
-        'Receita_Líquida': revenue_by_competition['Receita_Líquida'].sum(),
-        'Total_Descontos': revenue_by_competition['Total_Descontos'].sum()
+        'Total Inscritos': revenue_by_competition['Total Inscritos'].apply(lambda x: int(str(x).replace('.', '')) if isinstance(x, str) else x).sum(),
+        'Receita_Bruta': revenue_by_competition['Receita_Bruta'].apply(lambda x: int(str(x).replace('.', '')) if isinstance(x, str) else x).sum(),
+        'Receita_Líquida (com Cielo)': sum(cielo_liquida_2025.values()),
+        'Total_Descontos': revenue_by_competition['Total_Descontos'].apply(lambda x: int(str(x).replace('.', '')) if isinstance(x, str) else x).sum()
     }])
+    # Formata o total
+    total_row2['Total Inscritos'] = format_integer(total_row2['Total Inscritos'].iloc[0])
+    total_row2['Receita_Bruta'] = f"{int(round(total_row2['Receita_Bruta'].iloc[0])):,}".replace(',', '.')
+    total_row2['Receita_Líquida (com Cielo)'] = f"R$ {int(round(total_row2['Receita_Líquida (com Cielo)'].iloc[0])):,}".replace(',', '.')
+    total_row2['Total_Descontos'] = f"{int(round(total_row2['Total_Descontos'].iloc[0])):,}".replace(',', '.')
     revenue_by_competition = pd.concat([revenue_by_competition, total_row2], ignore_index=True)
     revenue_by_competition['Total Inscritos'] = revenue_by_competition['Total Inscritos'].apply(format_integer)
-    for col in ['Receita_Bruta', 'Receita_Líquida', 'Total_Descontos']:
-        revenue_by_competition[col] = revenue_by_competition[col].apply(lambda x: f"{int(round(x)):,}".replace(',', '.'))
-    st.table(revenue_by_competition)
+    for col in ['Receita_Bruta', 'Total_Descontos']:
+        revenue_by_competition[col] = revenue_by_competition[col].apply(lambda x: f"{int(round(int(str(x).replace('.', '')))):,}".replace(',', '.') if str(x).replace('.', '').isdigit() else x)
+    st.table(revenue_by_competition[[
+        'Competition', 'Total Inscritos', 'Receita_Bruta', 'Receita_Líquida (com Cielo)', 'Total_Descontos']])
 
 # --- Tabela: Ticket Médio por Percurso ---
 st.subheader("Ticket Médio por Percurso (R$)")
@@ -770,20 +795,34 @@ ticket_medio_df = df_financial.groupby('Competition').agg(
     Inscritos=('Email', 'nunique'),
     Receita_Líquida=('Registration amount', 'sum')
 ).reset_index()
-ticket_medio_df['Ticket Médio (R$)'] = ticket_medio_df['Receita_Líquida'] / ticket_medio_df['Inscritos']
+# Atualiza a coluna de receita líquida para 2025
+cielo_liquida_2025 = {
+    'FUN 7KM': 4412,
+    'PTR 20': 25531,
+    'PTR 35': 33444,
+    'PTR 55': 55720,
+    'UTSB 100': 38364
+}
+def update_cielo_ticket(row):
+    comp = str(row['Competition']).strip().upper()
+    if comp in cielo_liquida_2025:
+        return cielo_liquida_2025[comp]
+    return row['Receita_Líquida']
+ticket_medio_df['Receita_Líquida (com Cielo)'] = ticket_medio_df.apply(update_cielo_ticket, axis=1)
+ticket_medio_df['Ticket Médio (R$)'] = ticket_medio_df['Receita_Líquida (com Cielo)'] / ticket_medio_df['Inscritos']
 ticket_medio_df['Ticket Médio (R$)'] = ticket_medio_df['Ticket Médio (R$)'].apply(lambda x: f"R$ {x:,.2f}".replace(",", "."))
 ticket_medio_df['Inscritos'] = ticket_medio_df['Inscritos'].apply(format_integer)
-ticket_medio_df['Receita_Líquida'] = ticket_medio_df['Receita_Líquida'].apply(lambda x: f"R$ {x:,.0f}".replace(",", "."))
-
-ticket_medio_global = df_financial['Registration amount'].sum() / df_financial['Email'].nunique() if df_financial['Email'].nunique() > 0 else 0
+ticket_medio_df['Receita_Líquida (com Cielo)'] = ticket_medio_df['Receita_Líquida (com Cielo)'].apply(lambda x: f"R$ {x:,.0f}".replace(",", "."))
+# Total
+ticket_medio_global = sum(cielo_liquida_2025.values()) / ticket_medio_df['Inscritos'].apply(lambda x: int(str(x).replace('.', '')) if isinstance(x, str) else x).sum() if ticket_medio_df['Inscritos'].apply(lambda x: int(str(x).replace('.', '')) if isinstance(x, str) else x).sum() > 0 else 0
 total_row_ticket = pd.DataFrame([{
     'Competition': 'Total',
-    'Inscritos': format_integer(df_financial['Email'].nunique()),
-    'Receita_Líquida': f"R$ {df_financial['Registration amount'].sum():,.0f}".replace(",", "."),
+    'Inscritos': format_integer(ticket_medio_df['Inscritos'].apply(lambda x: int(str(x).replace('.', '')) if isinstance(x, str) else x).sum()),
+    'Receita_Líquida (com Cielo)': f"R$ {sum(cielo_liquida_2025.values()):,.0f}".replace(",", "."),
     'Ticket Médio (R$)': f"R$ {ticket_medio_global:,.2f}".replace(",", ".")
 }])
 ticket_medio_df = pd.concat([ticket_medio_df, total_row_ticket], ignore_index=True)
-st.table(ticket_medio_df)
+st.table(ticket_medio_df[['Competition', 'Inscritos', 'Receita_Líquida (com Cielo)', 'Ticket Médio (R$)']])
 
 st.divider()
 
