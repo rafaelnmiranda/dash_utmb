@@ -760,21 +760,37 @@ with st.expander("Detalhamento Financeiro"):
         'PTR 55': 55720,
         'UTSB 100': 38364
     }
-    # Atualiza a coluna para as linhas de 2025
+    
+    # Calcula receita líquida de outros anos (excluindo 2025)
+    df_other_years = df_financial[df_financial['Ano'] != 2025]
+    if not df_other_years.empty:
+        other_years_revenue = df_other_years.groupby('Competition')['Registration amount'].sum()
+    else:
+        other_years_revenue = pd.Series(dtype=float)
+    
+    # Atualiza a coluna para somar valores de 2025 (fixos) + outros anos (calculados)
     def update_cielo(row):
         comp = str(row['Competition']).strip().upper()
-        if comp in cielo_liquida_2025:
-            return f"R$ {cielo_liquida_2025[comp]:,.0f}".replace(",", ".")
-        return row['Receita_Líquida']
+        other_years_value = other_years_revenue.get(comp, 0)
+        cielo_value = cielo_liquida_2025.get(comp, 0)
+        total_value = other_years_value + cielo_value
+        return f"R$ {total_value:,.0f}".replace(",", ".")
+    
     revenue_by_competition['Receita_Líquida (com Cielo)'] = revenue_by_competition.apply(update_cielo, axis=1)
     # Remove a coluna antiga
     revenue_by_competition = revenue_by_competition.drop(columns=['Receita_Líquida'])
+    
+    # Calcula o total correto somando todos os valores
+    total_cielo = sum(cielo_liquida_2025.values())
+    total_other_years = other_years_revenue.sum() if not other_years_revenue.empty else 0
+    total_receita_liquida = total_other_years + total_cielo
+    
     # Atualiza o total
     total_row2 = pd.DataFrame([{
         'Competition': 'Total',
         'Total Inscritos': revenue_by_competition['Total Inscritos'].apply(lambda x: int(str(x).replace('.', '')) if isinstance(x, str) else x).sum(),
         'Receita_Bruta': revenue_by_competition['Receita_Bruta'].apply(lambda x: int(str(x).replace('.', '')) if isinstance(x, str) else x).sum(),
-        'Receita_Líquida (com Cielo)': sum(cielo_liquida_2025.values()),
+        'Receita_Líquida (com Cielo)': total_receita_liquida,
         'Total_Descontos': revenue_by_competition['Total_Descontos'].apply(lambda x: int(str(x).replace('.', '')) if isinstance(x, str) else x).sum()
     }])
     # Formata o total
@@ -795,7 +811,8 @@ ticket_medio_df = df_financial.groupby('Competition').agg(
     Inscritos=('Email', 'nunique'),
     Receita_Líquida=('Registration amount', 'sum')
 ).reset_index()
-# Atualiza a coluna de receita líquida para 2025
+
+# Atualiza a coluna de receita líquida para somar valores de 2025 (fixos) + outros anos (calculados)
 cielo_liquida_2025 = {
     'FUN 7KM': 4412,
     'PTR 20': 25531,
@@ -803,22 +820,37 @@ cielo_liquida_2025 = {
     'PTR 55': 55720,
     'UTSB 100': 38364
 }
+
+# Calcula receita líquida de outros anos (excluindo 2025)
+df_other_years = df_financial[df_financial['Ano'] != 2025]
+if not df_other_years.empty:
+    other_years_revenue = df_other_years.groupby('Competition')['Registration amount'].sum()
+else:
+    other_years_revenue = pd.Series(dtype=float)
+
 def update_cielo_ticket(row):
     comp = str(row['Competition']).strip().upper()
-    if comp in cielo_liquida_2025:
-        return cielo_liquida_2025[comp]
-    return row['Receita_Líquida']
+    other_years_value = other_years_revenue.get(comp, 0)
+    cielo_value = cielo_liquida_2025.get(comp, 0)
+    return other_years_value + cielo_value
+
 ticket_medio_df['Receita_Líquida (com Cielo)'] = ticket_medio_df.apply(update_cielo_ticket, axis=1)
 ticket_medio_df['Ticket Médio (R$)'] = ticket_medio_df['Receita_Líquida (com Cielo)'] / ticket_medio_df['Inscritos']
 ticket_medio_df['Ticket Médio (R$)'] = ticket_medio_df['Ticket Médio (R$)'].apply(lambda x: f"R$ {x:,.2f}".replace(",", "."))
 ticket_medio_df['Inscritos'] = ticket_medio_df['Inscritos'].apply(format_integer)
 ticket_medio_df['Receita_Líquida (com Cielo)'] = ticket_medio_df['Receita_Líquida (com Cielo)'].apply(lambda x: f"R$ {x:,.0f}".replace(",", "."))
-# Total
-ticket_medio_global = sum(cielo_liquida_2025.values()) / ticket_medio_df['Inscritos'].apply(lambda x: int(str(x).replace('.', '')) if isinstance(x, str) else x).sum() if ticket_medio_df['Inscritos'].apply(lambda x: int(str(x).replace('.', '')) if isinstance(x, str) else x).sum() > 0 else 0
+
+# Calcula o total correto
+total_cielo = sum(cielo_liquida_2025.values())
+total_other_years = other_years_revenue.sum() if not other_years_revenue.empty else 0
+total_receita_liquida = total_other_years + total_cielo
+total_inscritos = ticket_medio_df['Inscritos'].apply(lambda x: int(str(x).replace('.', '')) if isinstance(x, str) else x).sum()
+ticket_medio_global = total_receita_liquida / total_inscritos if total_inscritos > 0 else 0
+
 total_row_ticket = pd.DataFrame([{
     'Competition': 'Total',
-    'Inscritos': format_integer(ticket_medio_df['Inscritos'].apply(lambda x: int(str(x).replace('.', '')) if isinstance(x, str) else x).sum()),
-    'Receita_Líquida (com Cielo)': f"R$ {sum(cielo_liquida_2025.values()):,.0f}".replace(",", "."),
+    'Inscritos': format_integer(total_inscritos),
+    'Receita_Líquida (com Cielo)': f"R$ {total_receita_liquida:,.0f}".replace(",", "."),
     'Ticket Médio (R$)': f"R$ {ticket_medio_global:,.2f}".replace(",", ".")
 }])
 ticket_medio_df = pd.concat([ticket_medio_df, total_row_ticket], ignore_index=True)
