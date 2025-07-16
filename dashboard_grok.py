@@ -752,6 +752,11 @@ with st.expander("Detalhamento Financeiro"):
     grp['Total_Descontos'] = grp['Discounts amount']
     revenue_by_competition = grp.reset_index().drop(columns=['Registration amount', 'Discounts amount'])
 
+    # DEBUG: Mostrar anos e nomes de Competition
+    st.write('Valores únicos de Ano em df_financial:', df_financial['Ano'].unique())
+    st.write('Nomes de Competition em df_financial:', df_financial['Competition'].unique())
+    st.write('DataFrame revenue_by_competition:', revenue_by_competition)
+
     # --- Adiciona valores de Receita Líquida (com Cielo) para 2025 ---
     cielo_liquida_2025 = {
         'FUN 7KM': 4412,
@@ -760,31 +765,33 @@ with st.expander("Detalhamento Financeiro"):
         'PTR 55': 55720,
         'UTSB 100': 38364
     }
-    
     # Calcula receita líquida de outros anos (excluindo 2025)
     df_other_years = df_financial[df_financial['Ano'] != 2025]
     if not df_other_years.empty:
         other_years_revenue = df_other_years.groupby('Competition')['Registration amount'].sum()
     else:
         other_years_revenue = pd.Series(dtype=float)
-    
-    # Atualiza a coluna para somar valores de 2025 (fixos) + outros anos (calculados)
+    # Calcula receita líquida da base de dados para 2025
+    df_2025_fin = df_financial[df_financial['Ano'] == 2025]
+    if not df_2025_fin.empty:
+        revenue_2025 = df_2025_fin.groupby('Competition')['Registration amount'].sum()
+    else:
+        revenue_2025 = pd.Series(dtype=float)
     def update_cielo(row):
         comp = str(row['Competition']).strip().upper()
         other_years_value = other_years_revenue.get(comp, 0)
         cielo_value = cielo_liquida_2025.get(comp, 0)
-        total_value = other_years_value + cielo_value
+        value_2025 = revenue_2025.get(comp, 0)
+        total_value = other_years_value + value_2025 + cielo_value
         return f"R$ {total_value:,.0f}".replace(",", ".")
-    
     revenue_by_competition['Receita_Líquida (com Cielo)'] = revenue_by_competition.apply(update_cielo, axis=1)
     # Remove a coluna antiga
     revenue_by_competition = revenue_by_competition.drop(columns=['Receita_Líquida'])
-    
     # Calcula o total correto somando todos os valores
     total_cielo = sum(cielo_liquida_2025.values())
     total_other_years = other_years_revenue.sum() if not other_years_revenue.empty else 0
-    total_receita_liquida = total_other_years + total_cielo
-    
+    total_2025 = revenue_2025.sum() if not revenue_2025.empty else 0
+    total_receita_liquida = total_other_years + total_2025 + total_cielo
     # Atualiza o total
     total_row2 = pd.DataFrame([{
         'Competition': 'Total',
@@ -812,7 +819,7 @@ ticket_medio_df = df_financial.groupby('Competition').agg(
     Receita_Líquida=('Registration amount', 'sum')
 ).reset_index()
 
-# Atualiza a coluna de receita líquida para somar valores de 2025 (fixos) + outros anos (calculados)
+# Atualiza a coluna de receita líquida para somar valores de 2025 (fixos) + outros anos (calculados) + base 2025
 cielo_liquida_2025 = {
     'FUN 7KM': 4412,
     'PTR 20': 25531,
@@ -820,33 +827,34 @@ cielo_liquida_2025 = {
     'PTR 55': 55720,
     'UTSB 100': 38364
 }
-
-# Calcula receita líquida de outros anos (excluindo 2025)
 df_other_years = df_financial[df_financial['Ano'] != 2025]
 if not df_other_years.empty:
     other_years_revenue = df_other_years.groupby('Competition')['Registration amount'].sum()
 else:
     other_years_revenue = pd.Series(dtype=float)
-
+df_2025_fin = df_financial[df_financial['Ano'] == 2025]
+if not df_2025_fin.empty:
+    revenue_2025 = df_2025_fin.groupby('Competition')['Registration amount'].sum()
+else:
+    revenue_2025 = pd.Series(dtype=float)
 def update_cielo_ticket(row):
     comp = str(row['Competition']).strip().upper()
     other_years_value = other_years_revenue.get(comp, 0)
     cielo_value = cielo_liquida_2025.get(comp, 0)
-    return other_years_value + cielo_value
-
+    value_2025 = revenue_2025.get(comp, 0)
+    return other_years_value + value_2025 + cielo_value
 ticket_medio_df['Receita_Líquida (com Cielo)'] = ticket_medio_df.apply(update_cielo_ticket, axis=1)
 ticket_medio_df['Ticket Médio (R$)'] = ticket_medio_df['Receita_Líquida (com Cielo)'] / ticket_medio_df['Inscritos']
 ticket_medio_df['Ticket Médio (R$)'] = ticket_medio_df['Ticket Médio (R$)'].apply(lambda x: f"R$ {x:,.2f}".replace(",", "."))
 ticket_medio_df['Inscritos'] = ticket_medio_df['Inscritos'].apply(format_integer)
 ticket_medio_df['Receita_Líquida (com Cielo)'] = ticket_medio_df['Receita_Líquida (com Cielo)'].apply(lambda x: f"R$ {x:,.0f}".replace(",", "."))
-
 # Calcula o total correto
 total_cielo = sum(cielo_liquida_2025.values())
 total_other_years = other_years_revenue.sum() if not other_years_revenue.empty else 0
-total_receita_liquida = total_other_years + total_cielo
+total_2025 = revenue_2025.sum() if not revenue_2025.empty else 0
+total_receita_liquida = total_other_years + total_2025 + total_cielo
 total_inscritos = ticket_medio_df['Inscritos'].apply(lambda x: int(str(x).replace('.', '')) if isinstance(x, str) else x).sum()
 ticket_medio_global = total_receita_liquida / total_inscritos if total_inscritos > 0 else 0
-
 total_row_ticket = pd.DataFrame([{
     'Competition': 'Total',
     'Inscritos': format_integer(total_inscritos),
