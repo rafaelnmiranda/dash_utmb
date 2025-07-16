@@ -752,11 +752,6 @@ with st.expander("Detalhamento Financeiro"):
     grp['Total_Descontos'] = grp['Discounts amount']
     revenue_by_competition = grp.reset_index().drop(columns=['Registration amount', 'Discounts amount'])
 
-    # DEBUG: Mostrar anos e nomes de Competition
-    st.write('Valores únicos de Ano em df_financial:', df_financial['Ano'].unique())
-    st.write('Nomes de Competition em df_financial:', df_financial['Competition'].unique())
-    st.write('DataFrame revenue_by_competition:', revenue_by_competition)
-
     # --- Adiciona valores de Receita Líquida (com Cielo) para 2025 ---
     cielo_liquida_2025 = {
         'FUN 7KM': 4412,
