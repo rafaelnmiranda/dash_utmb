@@ -998,6 +998,9 @@ if st.button("Exportar Base Completa de Inscritos (JSON)"):
     df_exportacao = df_base_completa[list(colunas_exportacao.keys())].copy()
     df_exportacao.columns = list(colunas_exportacao.values())
     
+    # Debug: verificar colunas disponíveis
+    st.write("Colunas disponíveis no df_exportacao:", list(df_exportacao.columns))
+    
     # Converter valores numéricos para float para evitar problemas no JSON
     df_exportacao['Valor_Inscricao'] = pd.to_numeric(df_exportacao['Valor_Inscricao'], errors='coerce').fillna(0)
     df_exportacao['Valor_Desconto'] = pd.to_numeric(df_exportacao['Valor_Desconto'], errors='coerce').fillna(0)
