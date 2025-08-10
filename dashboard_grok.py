@@ -787,13 +787,13 @@ with st.expander("Detalhamento Financeiro"):
     total_other_years = other_years_revenue.sum() if not other_years_revenue.empty else 0
     total_2025 = revenue_2025.sum() if not revenue_2025.empty else 0
     total_receita_liquida = total_other_years + total_2025 + total_cielo
-    # Atualiza o total
+    # Atualiza o total - usar os valores numéricos originais antes da formatação
     total_row2 = pd.DataFrame([{
         'Competition': 'Total',
-        'Total Inscritos': revenue_by_competition['Total Inscritos'].apply(lambda x: int(str(x).replace('.', '')) if isinstance(x, str) else x).sum(),
-        'Receita_Bruta': revenue_by_competition['Receita_Bruta'].apply(lambda x: int(str(x).replace('.', '')) if isinstance(x, str) else x).sum(),
+        'Total Inscritos': grp['Total Inscritos'].sum(),
+        'Receita_Bruta': grp['Receita_Bruta'].sum(),
         'Receita_Líquida (com Cielo)': total_receita_liquida,
-        'Total_Descontos': revenue_by_competition['Total_Descontos'].apply(lambda x: int(str(x).replace('.', '')) if isinstance(x, str) else x).sum()
+        'Total_Descontos': grp['Total_Descontos'].sum()
     }])
     # Formata o total
     total_row2['Total Inscritos'] = format_integer(total_row2['Total Inscritos'].iloc[0])
@@ -802,8 +802,9 @@ with st.expander("Detalhamento Financeiro"):
     total_row2['Total_Descontos'] = f"{int(round(total_row2['Total_Descontos'].iloc[0])):,}".replace(',', '.')
     revenue_by_competition = pd.concat([revenue_by_competition, total_row2], ignore_index=True)
     revenue_by_competition['Total Inscritos'] = revenue_by_competition['Total Inscritos'].apply(format_integer)
-    for col in ['Receita_Bruta', 'Total_Descontos']:
-        revenue_by_competition[col] = revenue_by_competition[col].apply(lambda x: f"{int(round(int(str(x).replace('.', '')))):,}".replace(',', '.') if str(x).replace('.', '').isdigit() else x)
+    # Formatar as colunas numéricas
+    revenue_by_competition['Receita_Bruta'] = revenue_by_competition['Receita_Bruta'].apply(lambda x: f"{int(round(x)):,}".replace(',', '.') if isinstance(x, (int, float)) else x)
+    revenue_by_competition['Total_Descontos'] = revenue_by_competition['Total_Descontos'].apply(lambda x: f"{int(round(x)):,}".replace(',', '.') if isinstance(x, (int, float)) else x)
     st.table(revenue_by_competition[[
         'Competition', 'Total Inscritos', 'Receita_Bruta', 'Receita_Líquida (com Cielo)', 'Total_Descontos']])
 
