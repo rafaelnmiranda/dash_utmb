@@ -1019,11 +1019,21 @@ if st.button("Exportar Base Completa de Inscritos (JSON)"):
     
     # Adicionar metadados da exportação com verificações de segurança
     try:
+        # Converter para string antes de ordenar para evitar problemas de tipo
         anos_unicos = df_exportacao['Ano_Inscricao'].unique().tolist() if hasattr(df_exportacao['Ano_Inscricao'], 'unique') else list(set(df_exportacao['Ano_Inscricao']))
+        anos_unicos = [str(ano) for ano in anos_unicos if ano is not None]
+        
         competicoes_unicas = df_exportacao['Competicao'].unique().tolist() if hasattr(df_exportacao['Competicao'], 'unique') else list(set(df_exportacao['Competicao']))
+        competicoes_unicas = [str(comp) for comp in competicoes_unicas if comp is not None]
+        
         paises_unicos = df_exportacao['Pais'].unique().tolist() if hasattr(df_exportacao['Pais'], 'unique') else list(set(df_exportacao['Pais']))
+        paises_unicos = [str(pais) for pais in paises_unicos if pais is not None]
+        
         estados_unicos = df_exportacao['Estado'].dropna().unique().tolist() if hasattr(df_exportacao['Estado'], 'unique') else list(set(df_exportacao['Estado'].dropna()))
+        estados_unicos = [str(estado) for estado in estados_unicos if estado is not None]
+        
         regioes_unicas = df_exportacao['Regiao'].dropna().unique().tolist() if hasattr(df_exportacao['Regiao'], 'unique') else list(set(df_exportacao['Regiao'].dropna()))
+        regioes_unicas = [str(regiao) for regiao in regioes_unicas if regiao is not None]
         
         metadata = {
             "Data_Exportacao": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
@@ -1050,10 +1060,20 @@ if st.button("Exportar Base Completa de Inscritos (JSON)"):
         }
     except Exception as e:
         st.error(f"Erro ao criar metadados: {str(e)}")
-        # Fallback simples
+        # Fallback simples com todas as chaves necessárias
         metadata = {
             "Data_Exportacao": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
             "Total_Registros": len(df_exportacao),
+            "Anos_Incluidos": [],
+            "Competicoes_Incluidas": [],
+            "Paises_Representados": [],
+            "Estados_Brasil": [],
+            "Regioes_Brasil": [],
+            "Faixa_Etaria": {"Idade_Minima": 0, "Idade_Maxima": 0, "Idade_Media": 0},
+            "Distribuicao_Genero": {},
+            "Distribuicao_Nacionalidade": {},
+            "Distribuicao_Competicao": {},
+            "Valores_Financeiros": {"Receita_Total_Inscricoes": 0, "Descontos_Totais": 0, "Receita_Liquida": 0, "Ticket_Medio": 0},
             "Erro_Metadados": str(e)
         }
     
