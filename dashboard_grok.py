@@ -1024,13 +1024,13 @@ if st.button("Exportar Base Completa de Inscritos (JSON)"):
     else:
         st.info("Nenhuma coluna adicional (telefone, empresa, endereço) encontrada nos dados atuais")
     
+    df_exportacao = df_base_completa[list(colunas_exportacao.keys())].copy()
+    df_exportacao.columns = list(colunas_exportacao.values())
+    
     # Debug temporário para ver todas as colunas disponíveis
     with st.expander("🔍 Ver todas as colunas disponíveis nos dados"):
         st.write("Colunas originais nos dados:", sorted(df_base_completa.columns.tolist()))
         st.write("Colunas que serão exportadas:", sorted(df_exportacao.columns.tolist()))
-    
-    df_exportacao = df_base_completa[list(colunas_exportacao.keys())].copy()
-    df_exportacao.columns = list(colunas_exportacao.values())
     
     # Debug: verificar colunas disponíveis (apenas se necessário)
     # st.write("Colunas disponíveis no df_exportacao:", list(df_exportacao.columns))
