@@ -998,17 +998,22 @@ if st.button("Exportar Base Completa de Inscritos (JSON)"):
     
     # Adicionar colunas opcionais se existirem nos dados
     colunas_opcionais = {
-        'Phone': 'Telefone',
-        'Company': 'Empresa',
-        'Address': 'Endereco',
-        'Address 1': 'Endereco_1',
-        'Address 2': 'Endereco_2',
-        'Street': 'Rua',
-        'Street Address': 'Endereco_Rua',
-        'Postal Code': 'CEP',
-        'Zip Code': 'CEP',
-        'State': 'Estado_Original',
-        'Province': 'Provincia'
+        'Phone number': 'Telefone',
+        'Empresa': 'Empresa',
+        'Adress': 'Endereco',
+        'Zip code': 'CEP',
+        'Team / Club': 'Time_Clube',
+        'T-shirt size (man)': 'Tamanho_Camiseta_M',
+        'T-shirt size (woman)': 'Tamanho_Camiseta_F',
+        'Booking reference': 'Referencia_Reserva',
+        'Campaign link': 'Link_Campanha',
+        'Document status': 'Status_Documento',
+        'Status': 'Status_Inscricao',
+        'Schedule your Bib retrieval time': 'Horario_Retirada_Bib',
+        'UTMB indexes': 'Indices_UTMB',
+        'information_address': 'Informacao_Endereco',
+        'information_countryCode': 'Codigo_Pais',
+        'Total registration amount': 'Valor_Total_Inscricao'
     }
     
     # Verificar quais colunas opcionais existem e adicionar ao mapeamento
