@@ -1005,6 +1005,17 @@ if st.button("Exportar Base Completa de Inscritos (JSON)"):
     df_exportacao['Valor_Inscricao'] = pd.to_numeric(df_exportacao['Valor_Inscricao'], errors='coerce').fillna(0)
     df_exportacao['Valor_Desconto'] = pd.to_numeric(df_exportacao['Valor_Desconto'], errors='coerce').fillna(0)
     df_exportacao['Idade'] = pd.to_numeric(df_exportacao['Idade'], errors='coerce').fillna(0)
+
+    # Debug adicional antes dos metadados
+    st.write("Tipo de df_exportacao:", type(df_exportacao))
+    st.write("df_exportacao está vazio?", df_exportacao.empty)
+    if 'Ano_Inscricao' in df_exportacao.columns:
+        st.write("Coluna 'Ano_Inscricao' encontrada!")
+        st.write("Tipo da coluna 'Ano_Inscricao':", type(df_exportacao['Ano_Inscricao']))
+        st.write("Primeiros valores de 'Ano_Inscricao':", df_exportacao['Ano_Inscricao'].head().tolist())
+    else:
+        st.write("ERRO: Coluna 'Ano_Inscricao' NÃO encontrada!")
+        st.write("Colunas disponíveis:", list(df_exportacao.columns))
     
     # Adicionar metadados da exportação
     metadata = {
