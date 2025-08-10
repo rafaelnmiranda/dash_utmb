@@ -935,4 +935,126 @@ if st.button("Exportar JSON"):
         mime="application/json"
     )
 
+# Novo botão para exportar toda a base tratada dos inscritos
+st.divider()
+st.subheader("Exportação da Base Completa de Inscritos")
+
+if st.button("Exportar Base Completa de Inscritos (JSON)"):
+    # Preparar a base completa tratada
+    df_completo = df_total.copy()
+    
+    # Adicionar informações geográficas para brasileiros
+    df_br_completo = df_completo[df_completo['Country'].str.lower() == 'brazil'].copy()
+    df_br_completo = df_br_completo.merge(ibge_df[['City', 'UF', 'Região']], on='City', how='left')
+    
+    # Para estrangeiros, manter apenas as colunas originais
+    df_estrangeiros = df_completo[df_completo['Country'].str.lower() != 'brazil'].copy()
+    df_estrangeiros['UF'] = None
+    df_estrangeiros['Região'] = None
+    
+    # Combinar brasileiros e estrangeiros
+    df_base_completa = pd.concat([df_br_completo, df_estrangeiros], ignore_index=True)
+    
+    # Adicionar informações calculadas
+    df_base_completa['Idade'] = 2025 - pd.to_datetime(df_base_completa['Birthdate'], errors='coerce').dt.year
+    df_base_completa.loc[df_base_completa['Idade'] < 15, 'Idade'] = 40  # Aplicar a mesma lógica do dashboard
+    
+    # Padronizar nacionalidade
+    df_base_completa['Nacionalidade_Padronizada'] = df_base_completa['Nationality'].apply(standardize_nationality)
+    
+    # Adicionar informações de gênero padronizadas
+    df_base_completa['Genero_Padronizado'] = df_base_completa['Gender'].str.strip().str.upper().map({
+        'M': 'Masculino', 'MALE': 'Masculino', 'F': 'Feminino', 'FEMALE': 'Feminino'
+    }).fillna('Não Informado')
+    
+    # Converter datas para string para JSON
+    df_base_completa['Registration_date_str'] = df_base_completa['Registration date'].dt.strftime('%Y-%m-%d')
+    df_base_completa['Birthdate_str'] = pd.to_datetime(df_base_completa['Birthdate'], errors='coerce').dt.strftime('%Y-%m-%d')
+    
+    # Selecionar e renomear colunas para o JSON
+    colunas_exportacao = {
+        'Ano': 'Ano_Inscricao',
+        'Competition': 'Competicao',
+        'Email': 'Email',
+        'First name': 'Nome',
+        'Last name': 'Sobrenome',
+        'Gender': 'Genero_Original',
+        'Genero_Padronizado': 'Genero',
+        'Birthdate_str': 'Data_Nascimento',
+        'Idade': 'Idade',
+        'Nationality': 'Nacionalidade_Original',
+        'Nacionalidade_Padronizada': 'Nacionalidade',
+        'Country': 'Pais',
+        'City': 'Cidade',
+        'UF': 'Estado',
+        'Região': 'Regiao',
+        'Registration_date_str': 'Data_Inscricao',
+        'Registration amount': 'Valor_Inscricao',
+        'Discounts amount': 'Valor_Desconto',
+        'Discount code': 'Codigo_Desconto',
+        'Moeda': 'Moeda'
+    }
+    
+    df_exportacao = df_base_completa[list(colunas_exportacao.keys())].copy()
+    df_exportacao.columns = list(colunas_exportacao.values())
+    
+    # Converter valores numéricos para float para evitar problemas no JSON
+    df_exportacao['Valor_Inscricao'] = pd.to_numeric(df_exportacao['Valor_Inscricao'], errors='coerce').fillna(0)
+    df_exportacao['Valor_Desconto'] = pd.to_numeric(df_exportacao['Valor_Desconto'], errors='coerce').fillna(0)
+    df_exportacao['Idade'] = pd.to_numeric(df_exportacao['Idade'], errors='coerce').fillna(0)
+    
+    # Adicionar metadados da exportação
+    metadata = {
+        "Data_Exportacao": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        "Total_Registros": len(df_exportacao),
+        "Anos_Incluidos": sorted(df_exportacao['Ano_Inscricao'].unique()).tolist(),
+        "Competicoes_Incluidas": sorted(df_exportacao['Competicao'].unique()).tolist(),
+        "Paises_Representados": sorted(df_exportacao['Pais'].unique()).tolist(),
+        "Estados_Brasil": sorted(df_exportacao['Estado'].dropna().unique()).tolist(),
+        "Regioes_Brasil": sorted(df_exportacao['Regiao'].dropna().unique()).tolist(),
+        "Faixa_Etaria": {
+            "Idade_Minima": int(df_exportacao['Idade'].min()),
+            "Idade_Maxima": int(df_exportacao['Idade'].max()),
+            "Idade_Media": float(df_exportacao['Idade'].mean())
+        },
+        "Distribuicao_Genero": df_exportacao['Genero'].value_counts().to_dict(),
+        "Distribuicao_Nacionalidade": df_exportacao['Nacionalidade'].value_counts().head(10).to_dict(),
+        "Distribuicao_Competicao": df_exportacao['Competicao'].value_counts().to_dict(),
+        "Valores_Financeiros": {
+            "Receita_Total_Inscricoes": float(df_exportacao['Valor_Inscricao'].sum()),
+            "Descontos_Totais": float(df_exportacao['Valor_Desconto'].sum()),
+            "Receita_Liquida": float(df_exportacao['Valor_Inscricao'].sum() - df_exportacao['Valor_Desconto'].sum()),
+            "Ticket_Medio": float(df_exportacao['Valor_Inscricao'].mean())
+        }
+    }
+    
+    # Criar o JSON final
+    base_completa_json = {
+        "metadata": metadata,
+        "inscritos": df_exportacao.to_dict(orient="records")
+    }
+    
+    json_str_completo = json.dumps(base_completa_json, ensure_ascii=False, indent=2)
+    
+    st.success(f"Base completa exportada com {len(df_exportacao)} registros!")
+    st.download_button(
+        label="Baixar Base Completa (JSON)",
+        data=json_str_completo,
+        file_name=f"base_completa_inscritos_utmb_{data_base:%Y%m%d}.json",
+        mime="application/json"
+    )
+    
+    # Mostrar resumo da exportação
+    with st.expander("Resumo da Base Exportada"):
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Total de Registros", len(df_exportacao))
+            st.metric("Anos Incluídos", len(metadata["Anos_Incluidos"]))
+        with col2:
+            st.metric("Países Representados", len(metadata["Paises_Representados"]))
+            st.metric("Competições", len(metadata["Competicoes_Incluidas"]))
+        with col3:
+            st.metric("Estados Brasil", len(metadata["Estados_Brasil"]))
+            st.metric("Idade Média", f"{metadata['Faixa_Etaria']['Idade_Media']:.1f}")
+
 st.markdown("***Fim do Dashboard***")
