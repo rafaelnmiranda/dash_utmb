@@ -996,6 +996,20 @@ if st.button("Exportar Base Completa de Inscritos (JSON)"):
         'Moeda': 'Moeda'
     }
     
+    # Adicionar colunas opcionais se existirem nos dados
+    colunas_opcionais = {
+        'Phone': 'Telefone',
+        'Company': 'Empresa'
+    }
+    
+    # Verificar quais colunas opcionais existem e adicionar ao mapeamento
+    for col_original, col_nova in colunas_opcionais.items():
+        if col_original in df_base_completa.columns:
+            colunas_exportacao[col_original] = col_nova
+            st.write(f"Coluna '{col_original}' encontrada e será incluída como '{col_nova}'")
+        else:
+            st.write(f"Coluna '{col_original}' não encontrada nos dados")
+    
     df_exportacao = df_base_completa[list(colunas_exportacao.keys())].copy()
     df_exportacao.columns = list(colunas_exportacao.values())
     
