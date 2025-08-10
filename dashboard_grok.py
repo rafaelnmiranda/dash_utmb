@@ -1012,34 +1012,39 @@ if st.button("Exportar Base Completa de Inscritos (JSON)"):
     }
     
     # Verificar quais colunas opcionais existem e adicionar ao mapeamento
+    colunas_encontradas = []
     for col_original, col_nova in colunas_opcionais.items():
         if col_original in df_base_completa.columns:
             colunas_exportacao[col_original] = col_nova
-            st.write(f"Coluna '{col_original}' encontrada e será incluída como '{col_nova}'")
-        else:
-            st.write(f"Coluna '{col_original}' não encontrada nos dados")
+            colunas_encontradas.append(col_nova)
+    
+    # Mostrar apenas um resumo das colunas encontradas
+    if colunas_encontradas:
+        st.success(f"Colunas adicionais incluídas: {', '.join(colunas_encontradas)}")
+    else:
+        st.info("Nenhuma coluna adicional (telefone, empresa, endereço) encontrada nos dados atuais")
     
     df_exportacao = df_base_completa[list(colunas_exportacao.keys())].copy()
     df_exportacao.columns = list(colunas_exportacao.values())
     
-    # Debug: verificar colunas disponíveis
-    st.write("Colunas disponíveis no df_exportacao:", list(df_exportacao.columns))
+    # Debug: verificar colunas disponíveis (apenas se necessário)
+    # st.write("Colunas disponíveis no df_exportacao:", list(df_exportacao.columns))
     
     # Converter valores numéricos para float para evitar problemas no JSON
     df_exportacao['Valor_Inscricao'] = pd.to_numeric(df_exportacao['Valor_Inscricao'], errors='coerce').fillna(0)
     df_exportacao['Valor_Desconto'] = pd.to_numeric(df_exportacao['Valor_Desconto'], errors='coerce').fillna(0)
     df_exportacao['Idade'] = pd.to_numeric(df_exportacao['Idade'], errors='coerce').fillna(0)
 
-    # Debug adicional antes dos metadados
-    st.write("Tipo de df_exportacao:", type(df_exportacao))
-    st.write("df_exportacao está vazio?", df_exportacao.empty)
-    if 'Ano_Inscricao' in df_exportacao.columns:
-        st.write("Coluna 'Ano_Inscricao' encontrada!")
-        st.write("Tipo da coluna 'Ano_Inscricao':", type(df_exportacao['Ano_Inscricao']))
-        st.write("Primeiros valores de 'Ano_Inscricao':", df_exportacao['Ano_Inscricao'].head().tolist())
-    else:
-        st.write("ERRO: Coluna 'Ano_Inscricao' NÃO encontrada!")
-        st.write("Colunas disponíveis:", list(df_exportacao.columns))
+    # Debug adicional antes dos metadados (apenas se necessário)
+    # st.write("Tipo de df_exportacao:", type(df_exportacao))
+    # st.write("df_exportacao está vazio?", df_exportacao.empty)
+    # if 'Ano_Inscricao' in df_exportacao.columns:
+    #     st.write("Coluna 'Ano_Inscricao' encontrada!")
+    #     st.write("Tipo da coluna 'Ano_Inscricao':", type(df_exportacao['Ano_Inscricao']))
+    #     st.write("Primeiros valores de 'Ano_Inscricao':", df_exportacao['Ano_Inscricao'].head().tolist())
+    # else:
+    #     st.write("ERRO: Coluna 'Ano_Inscricao' NÃO encontrada!")
+    #     st.write("Colunas disponíveis:", list(df_exportacao.columns))
     
     # Adicionar metadados da exportação com verificações de segurança
     try:
