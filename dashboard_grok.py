@@ -1017,30 +1017,45 @@ if st.button("Exportar Base Completa de Inscritos (JSON)"):
         st.write("ERRO: Coluna 'Ano_Inscricao' NÃO encontrada!")
         st.write("Colunas disponíveis:", list(df_exportacao.columns))
     
-    # Adicionar metadados da exportação
-    metadata = {
-        "Data_Exportacao": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-        "Total_Registros": len(df_exportacao),
-        "Anos_Incluidos": sorted(df_exportacao['Ano_Inscricao'].unique()).tolist(),
-        "Competicoes_Incluidas": sorted(df_exportacao['Competicao'].unique()).tolist(),
-        "Paises_Representados": sorted(df_exportacao['Pais'].unique()).tolist(),
-        "Estados_Brasil": sorted(df_exportacao['Estado'].dropna().unique()).tolist(),
-        "Regioes_Brasil": sorted(df_exportacao['Regiao'].dropna().unique()).tolist(),
-        "Faixa_Etaria": {
-            "Idade_Minima": int(df_exportacao['Idade'].min()),
-            "Idade_Maxima": int(df_exportacao['Idade'].max()),
-            "Idade_Media": float(df_exportacao['Idade'].mean())
-        },
-        "Distribuicao_Genero": df_exportacao['Genero'].value_counts().to_dict(),
-        "Distribuicao_Nacionalidade": df_exportacao['Nacionalidade'].value_counts().head(10).to_dict(),
-        "Distribuicao_Competicao": df_exportacao['Competicao'].value_counts().to_dict(),
-        "Valores_Financeiros": {
-            "Receita_Total_Inscricoes": float(df_exportacao['Valor_Inscricao'].sum()),
-            "Descontos_Totais": float(df_exportacao['Valor_Desconto'].sum()),
-            "Receita_Liquida": float(df_exportacao['Valor_Inscricao'].sum() - df_exportacao['Valor_Desconto'].sum()),
-            "Ticket_Medio": float(df_exportacao['Valor_Inscricao'].mean())
+    # Adicionar metadados da exportação com verificações de segurança
+    try:
+        anos_unicos = df_exportacao['Ano_Inscricao'].unique().tolist() if hasattr(df_exportacao['Ano_Inscricao'], 'unique') else list(set(df_exportacao['Ano_Inscricao']))
+        competicoes_unicas = df_exportacao['Competicao'].unique().tolist() if hasattr(df_exportacao['Competicao'], 'unique') else list(set(df_exportacao['Competicao']))
+        paises_unicos = df_exportacao['Pais'].unique().tolist() if hasattr(df_exportacao['Pais'], 'unique') else list(set(df_exportacao['Pais']))
+        estados_unicos = df_exportacao['Estado'].dropna().unique().tolist() if hasattr(df_exportacao['Estado'], 'unique') else list(set(df_exportacao['Estado'].dropna()))
+        regioes_unicas = df_exportacao['Regiao'].dropna().unique().tolist() if hasattr(df_exportacao['Regiao'], 'unique') else list(set(df_exportacao['Regiao'].dropna()))
+        
+        metadata = {
+            "Data_Exportacao": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            "Total_Registros": len(df_exportacao),
+            "Anos_Incluidos": sorted(anos_unicos),
+            "Competicoes_Incluidas": sorted(competicoes_unicas),
+            "Paises_Representados": sorted(paises_unicos),
+            "Estados_Brasil": sorted(estados_unicos),
+            "Regioes_Brasil": sorted(regioes_unicas),
+            "Faixa_Etaria": {
+                "Idade_Minima": int(df_exportacao['Idade'].min()),
+                "Idade_Maxima": int(df_exportacao['Idade'].max()),
+                "Idade_Media": float(df_exportacao['Idade'].mean())
+            },
+            "Distribuicao_Genero": df_exportacao['Genero'].value_counts().to_dict(),
+            "Distribuicao_Nacionalidade": df_exportacao['Nacionalidade'].value_counts().head(10).to_dict(),
+            "Distribuicao_Competicao": df_exportacao['Competicao'].value_counts().to_dict(),
+            "Valores_Financeiros": {
+                "Receita_Total_Inscricoes": float(df_exportacao['Valor_Inscricao'].sum()),
+                "Descontos_Totais": float(df_exportacao['Valor_Desconto'].sum()),
+                "Receita_Liquida": float(df_exportacao['Valor_Inscricao'].sum() - df_exportacao['Valor_Desconto'].sum()),
+                "Ticket_Medio": float(df_exportacao['Valor_Inscricao'].mean())
+            }
         }
-    }
+    except Exception as e:
+        st.error(f"Erro ao criar metadados: {str(e)}")
+        # Fallback simples
+        metadata = {
+            "Data_Exportacao": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            "Total_Registros": len(df_exportacao),
+            "Erro_Metadados": str(e)
+        }
     
     # Criar o JSON final
     base_completa_json = {
