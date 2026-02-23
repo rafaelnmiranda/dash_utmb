@@ -1,6 +1,7 @@
 import json
 import re
 import unicodedata
+import difflib
 from datetime import date
 from io import BytesIO
 
@@ -9,6 +10,7 @@ import plotly.express as px
 import plotly.figure_factory as ff
 import requests
 import streamlit as st
+import streamlit.components.v1 as components
 
 
 st.set_page_config(
@@ -36,8 +38,6 @@ DEFAULT_MODULES = [
     "Financeiro",
     "Exportacoes",
 ]
-
-MODULE_DECISION_OPTIONS = ["Manter", "Ajustar", "Remover"]
 REQUIRED_COLUMNS = [
     "Edition ID",
     "Registration date",
@@ -47,6 +47,16 @@ REQUIRED_COLUMNS = [
     "Total registration amount",
     "Total discounts amount",
 ]
+
+PERCURSO_ORDER = ["PTR 108", "PTR 58", "PTR 34", "PTR 25", "PTR 17", "RUN 7"]
+DEFAULT_PERCURSO_TARGETS = {
+    "PTR 108": 400,
+    "PTR 58": 1000,
+    "PTR 34": 1000,
+    "PTR 25": 1000,
+    "PTR 17": 600,
+    "RUN 7": 1000,
+}
 
 
 def apply_theme() -> None:
@@ -77,6 +87,24 @@ def apply_theme() -> None:
             border-radius: 12px;
             padding: 10px 12px;
             margin-bottom: 8px;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def apply_print_css() -> None:
+    st.markdown(
+        """
+        <style>
+        @media print {
+          [data-testid="stSidebar"], [data-testid="stToolbar"], header, footer {
+            display: none !important;
+          }
+          .element-container, .stTable, .plotly-graph-div {
+            page-break-inside: avoid !important;
+          }
         }
         </style>
         """,
@@ -139,17 +167,36 @@ def standardize_competition(value):
         return value
     val = str(value).strip().upper()
     mapping = {
-        "UTSB 110": "UTSB 100",
-        "UTSB 100 (108KM)": "UTSB 100",
-        "PTR 55 (58KM)": "PTR 55",
-        "PTR 35 (34KM)": "PTR 35",
-        "PTR 20 (25KM)": "PTR 20",
-        "FUN 7KM": "FUN 7KM",
-        "FUN 7KM ": "FUN 7KM",
-        "FUN 7": "FUN 7KM",
-        "PTR20": "PTR 20",
-        "PTR35": "PTR 35",
-        "PTR55": "PTR 55",
+        "UTSB 110": "PTR 108",
+        "UTSB 100": "PTR 108",
+        "UTSB 100 (108KM)": "PTR 108",
+        "PTR 108": "PTR 108",
+        "PTR108": "PTR 108",
+        "PTR 55 (58KM)": "PTR 58",
+        "PTR 55": "PTR 58",
+        "PTR55": "PTR 58",
+        "PTR 58": "PTR 58",
+        "PTR58": "PTR 58",
+        "PTR 35 (34KM)": "PTR 34",
+        "PTR 35": "PTR 34",
+        "PTR35": "PTR 34",
+        "PTR 34": "PTR 34",
+        "PTR34": "PTR 34",
+        "PTR 20 (25KM)": "PTR 25",
+        "PTR 20": "PTR 25",
+        "PTR20": "PTR 25",
+        "PTR 25": "PTR 25",
+        "PTR25": "PTR 25",
+        "PTR 17": "PTR 17",
+        "PTR17": "PTR 17",
+        "PTR 17KM": "PTR 17",
+        "PTR17KM": "PTR 17",
+        "PTR 17 (17KM)": "PTR 17",
+        "RUN 7": "RUN 7",
+        "RUN7": "RUN 7",
+        "FUN 7KM": "RUN 7",
+        "FUN 7KM ": "RUN 7",
+        "FUN 7": "RUN 7",
         "KIDS": "KIDS",
         "KIDS RACE": "KIDS",
     }
@@ -165,6 +212,56 @@ def standardize_nationality(value):
         "BRAZIL": "BR",
     }
     return mapping.get(val, val)
+
+
+def normalize_col_name(value: str) -> str:
+    return norm_text(str(value)).replace(" ", "_")
+
+
+def parse_opt_in_series(series: pd.Series) -> pd.Series:
+    numeric = pd.to_numeric(series, errors="coerce")
+    numeric_flag = numeric.fillna(0).gt(0)
+    txt = series.astype(str).str.strip().str.lower()
+    text_flag = txt.isin(
+        {
+            "true",
+            "1",
+            "yes",
+            "y",
+            "sim",
+            "interessado",
+            "interessada",
+            "quero",
+            "i am interested",
+            "interested",
+        }
+    )
+    return (numeric_flag | text_flag).astype(int)
+
+
+def detect_official_bus_column(columns):
+    for col in columns:
+        col_norm = normalize_col_name(col)
+        has_bus = any(token in col_norm for token in ["bus", "onibus", "transporte", "shuttle"])
+        has_intent = any(token in col_norm for token in ["official", "oficial", "interesse", "interested", "opt"])
+        if has_bus and has_intent:
+            return col
+    return None
+
+
+def sort_competitions(df: pd.DataFrame, col_name: str) -> pd.DataFrame:
+    local = df.copy()
+    local["_order"] = pd.Categorical(local[col_name], categories=PERCURSO_ORDER, ordered=True)
+    local = local.sort_values("_order", na_position="last").drop(columns="_order")
+    return local
+
+
+def correct_city(city: str, ibge_df: pd.DataFrame, city_choices: list[str], cutoff: float = 0.8) -> str:
+    norm = norm_text(city)
+    matches = difflib.get_close_matches(norm, city_choices, n=1, cutoff=cutoff)
+    if matches:
+        return ibge_df.loc[ibge_df["City_norm"] == matches[0], "City"].iat[0]
+    return str(city)
 
 
 @st.cache_data(show_spinner=False)
@@ -220,16 +317,17 @@ def preprocess_uploaded_file(uploaded_file) -> pd.DataFrame:
         df["yopp_flag"] = 0
 
     if "nubank_opt" in df.columns:
-        df["nubank_flag"] = (
-            df["nubank_opt"]
-            .astype(str)
-            .str.strip()
-            .str.lower()
-            .eq("yes, i will pay with a nubank card")
-            .astype(int)
-        )
+        df["nubank_flag"] = df["nubank_opt"].astype(str).str.strip().str.lower().eq(
+            "yes, i will pay with a nubank card"
+        ).astype(int)
     else:
         df["nubank_flag"] = 0
+
+    bus_col = detect_official_bus_column(df.columns)
+    if bus_col:
+        df["official_bus_flag"] = parse_opt_in_series(df[bus_col])
+    else:
+        df["official_bus_flag"] = 0
 
     if "bin_number" in df.columns:
         df["bin_number"] = (
@@ -271,6 +369,15 @@ def render_header(kpi_df: pd.DataFrame, data_base: date) -> None:
     countries = kpi_df["country_std"].replace({"": pd.NA, "NAN": pd.NA}).dropna().nunique()
     net_revenue = kpi_df["net_revenue_brl"].sum()
     avg_ticket = (net_revenue / total) if total else 0
+    br_mask = kpi_df["nationality_std"].eq("BR")
+    foreign_mask = ~br_mask
+    yopp_total = int(kpi_df["yopp_flag"].sum()) if "yopp_flag" in kpi_df.columns else 0
+    yopp_br = int(kpi_df.loc[br_mask, "yopp_flag"].sum()) if "yopp_flag" in kpi_df.columns else 0
+    yopp_foreign = int(kpi_df.loc[foreign_mask, "yopp_flag"].sum()) if "yopp_flag" in kpi_df.columns else 0
+    nubank_total = int(kpi_df["nubank_flag"].sum()) if "nubank_flag" in kpi_df.columns else 0
+    bus_total = int(kpi_df["official_bus_flag"].sum()) if "official_bus_flag" in kpi_df.columns else 0
+    bus_br = int(kpi_df.loc[br_mask, "official_bus_flag"].sum()) if "official_bus_flag" in kpi_df.columns else 0
+    bus_foreign = int(kpi_df.loc[foreign_mask, "official_bus_flag"].sum()) if "official_bus_flag" in kpi_df.columns else 0
 
     st.markdown(
         f"""
@@ -282,36 +389,145 @@ def render_header(kpi_df: pd.DataFrame, data_base: date) -> None:
         unsafe_allow_html=True,
     )
 
-    c1, c2, c3, c4, c5, c6 = st.columns(6)
+    c1, c2, c3, c4, c5, c6, c7 = st.columns(7)
     c1.metric("Inscritos ativos", format_int(total))
     c2.metric("% mulheres", format_pct(pct_female))
     c3.metric("% estrangeiros", format_pct(pct_foreigners))
     c4.metric("Paises distintos", format_int(countries))
     c5.metric("Receita liquida", format_currency(net_revenue))
     c6.metric("Ticket medio", format_currency(avg_ticket))
+    c7.metric("Pagaram com cartao Nubank", format_int(nubank_total))
+
+    y1, y2 = st.columns(2)
+    y1.metric("Oculos Yopp vendidos", format_int(yopp_total))
+    y1.caption(f"BR: {format_int(yopp_br)} | Estrangeiros: {format_int(yopp_foreign)}")
+    y2.metric("Interessados no onibus oficial", format_int(bus_total))
+    y2.caption(f"BR: {format_int(bus_br)} | Estrangeiros: {format_int(bus_foreign)}")
 
 
-def render_module_review(decisions: dict[str, str]) -> None:
-    rows = [{"Modulo": module, "Decisao 2026": decision} for module, decision in decisions.items()]
-    st.markdown("### Checkpoint de modulos 2026")
-    st.caption("Use este quadro para revisar comigo modulo por modulo: Manter, Ajustar ou Remover.")
-    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
-
-
-def render_progress_projection(df: pd.DataFrame, meta_total: int, start_date: date, end_date: date) -> None:
-    st.header("Projecoes e ritmo de vendas")
-    comp_counts = (
-        df["Competition"].fillna("NA")
-        .value_counts()
-        .rename_axis("Competition")
-        .reset_index(name="Inscritos")
-        .sort_values("Inscritos", ascending=False)
+def build_route_summary(df: pd.DataFrame, targets: dict[str, int]) -> pd.DataFrame:
+    local = df.copy()
+    if "gender" not in local.columns:
+        local["gender"] = ""
+    grouped = (
+        local.groupby("Competition", dropna=False)
+        .agg(
+            inscritos=("Competition", "size"),
+            receita_bruta=("total_registration_brl", "sum"),
+            descontos=("total_discounts_brl", "sum"),
+            receita_liquida=("net_revenue_brl", "sum"),
+            mulheres=("gender", lambda s: s.astype(str).str.upper().isin(["F", "FEMALE"]).sum()),
+        )
+        .reset_index()
+        .rename(columns={"Competition": "Percurso"})
     )
+    grouped["meta"] = grouped["Percurso"].map(targets).fillna(0).astype(int)
+    grouped["pct_meta"] = grouped.apply(
+        lambda row: (row["inscritos"] / row["meta"] * 100) if row["meta"] else 0,
+        axis=1,
+    )
+    grouped["pct_mulheres"] = grouped.apply(
+        lambda row: (row["mulheres"] / row["inscritos"] * 100) if row["inscritos"] else 0,
+        axis=1,
+    )
+
+    route_base = pd.DataFrame({"Percurso": PERCURSO_ORDER})
+    route_base["meta"] = route_base["Percurso"].map(targets).fillna(0).astype(int)
+    route_summary = route_base.merge(
+        grouped.drop(columns="meta"),
+        on="Percurso",
+        how="left",
+    ).fillna(
+        {
+            "inscritos": 0,
+            "receita_bruta": 0,
+            "descontos": 0,
+            "receita_liquida": 0,
+            "mulheres": 0,
+            "pct_meta": 0,
+            "pct_mulheres": 0,
+        }
+    )
+    route_summary["inscritos"] = route_summary["inscritos"].astype(int)
+    route_summary["mulheres"] = route_summary["mulheres"].astype(int)
+
+    total_inscritos = int(route_summary["inscritos"].sum())
+    total_meta = int(route_summary["meta"].sum())
+    total_mulheres = int(route_summary["mulheres"].sum())
+    total_row = pd.DataFrame(
+        [
+            {
+                "Percurso": "TOTAL",
+                "meta": total_meta,
+                "inscritos": total_inscritos,
+                "receita_bruta": float(route_summary["receita_bruta"].sum()),
+                "descontos": float(route_summary["descontos"].sum()),
+                "receita_liquida": float(route_summary["receita_liquida"].sum()),
+                "mulheres": total_mulheres,
+                "pct_meta": (total_inscritos / total_meta * 100) if total_meta else 0,
+                "pct_mulheres": (total_mulheres / total_inscritos * 100) if total_inscritos else 0,
+            }
+        ]
+    )
+    return pd.concat([route_summary, total_row], ignore_index=True)
+
+
+def render_progress_projection(df: pd.DataFrame, targets: dict[str, int], start_date: date, end_date: date) -> None:
+    st.header("Projecoes e ritmo de vendas")
+    summary = build_route_summary(df, targets)
+    table = summary.copy()
+    table["Meta"] = table["meta"].map(format_int)
+    table["Inscritos atuais"] = table["inscritos"].map(format_int)
+    table["% meta"] = table["pct_meta"].map(format_pct)
+    table["Receita bruta (R$)"] = table["receita_bruta"].map(format_int)
+    table["Descontos (R$)"] = table["descontos"].map(format_int)
+    table["Receita liquida (R$)"] = table["receita_liquida"].map(format_int)
+    table["% mulheres"] = table["pct_mulheres"].map(format_pct)
+    st.dataframe(
+        table[
+            [
+                "Percurso",
+                "Meta",
+                "Inscritos atuais",
+                "% meta",
+                "Receita liquida (R$)",
+                "Descontos (R$)",
+                "Receita bruta (R$)",
+                "% mulheres",
+            ]
+        ],
+        hide_index=True,
+        use_container_width=True,
+    )
+
+    comp_counts = summary[summary["Percurso"] != "TOTAL"].copy()
     st.subheader("Metas por percurso (inscritos atuais)")
-    fig_comp = px.bar(comp_counts, x="Competition", y="Inscritos", text="Inscritos", color="Competition")
-    fig_comp.update_layout(showlegend=False, height=350)
+    chart_df = comp_counts.rename(columns={"Percurso": "Competition", "inscritos": "Inscritos", "meta": "Meta"})
+    fig_comp = px.bar(
+        chart_df.melt(
+            id_vars=["Competition", "pct_meta"],
+            value_vars=["Inscritos", "Meta"],
+            var_name="Serie",
+            value_name="Quantidade",
+        ),
+        x="Competition",
+        y="Quantidade",
+        color="Serie",
+        barmode="group",
+        text="Quantidade",
+        category_orders={"Competition": PERCURSO_ORDER},
+    )
+    fig_comp.add_scatter(
+        x=chart_df["Competition"],
+        y=chart_df[["Inscritos", "Meta"]].max(axis=1) * 1.06,
+        mode="text",
+        text=chart_df["pct_meta"].map(format_pct),
+        showlegend=False,
+    )
+    fig_comp.update_layout(height=380)
     st.plotly_chart(fig_comp, use_container_width=True)
 
+    meta_total = int(comp_counts["meta"].sum())
     total = len(df)
     elapsed_days = max((date.today() - start_date).days, 0)
     total_days = max((end_date - start_date).days, 1)
@@ -365,21 +581,6 @@ def render_demography(df: pd.DataFrame) -> None:
         hist.update_layout(height=320)
         st.plotly_chart(hist, use_container_width=True)
 
-    if "gender" in df.columns:
-        gender_counts = (
-            df["gender"]
-            .astype(str)
-            .str.upper()
-            .replace({"FEMALE": "F", "MALE": "M"})
-            .value_counts()
-            .rename_axis("Genero")
-            .reset_index(name="Qtd")
-        )
-        if not gender_counts.empty:
-            fig_gender = px.pie(gender_counts, names="Genero", values="Qtd", hole=0.45)
-            fig_gender.update_layout(height=320)
-            st.plotly_chart(fig_gender, use_container_width=True)
-
 
 def render_geography(df: pd.DataFrame, ibge_df: pd.DataFrame) -> None:
     st.header("Geografia Brasil")
@@ -388,19 +589,31 @@ def render_geography(df: pd.DataFrame, ibge_df: pd.DataFrame) -> None:
         st.info("Sem inscritos do Brasil para exibir nesta filtragem.")
         return
 
-    city_counts = (
-        brazil["city"].astype(str).value_counts().head(15).rename_axis("Cidade").reset_index(name="Inscritos")
-    )
+    city_choices = ibge_df["City_norm"].tolist()
+    brazil["city_display"] = brazil["city"].astype(str).apply(lambda c: correct_city(c, ibge_df, city_choices))
+    brazil["city_norm"] = brazil["city_display"].map(norm_text)
+    total_brazil = len(brazil)
+    city_counts = brazil["city_display"].value_counts().rename_axis("Cidade").reset_index(name="Inscritos")
+    city_counts["% brasileiros"] = city_counts["Inscritos"].apply(lambda v: format_pct((v / total_brazil) * 100))
     st.subheader("Top cidades")
-    st.plotly_chart(px.bar(city_counts, x="Inscritos", y="Cidade", orientation="h"), use_container_width=True)
+    st.dataframe(city_counts, hide_index=True, use_container_width=True)
 
     merged = brazil.merge(ibge_df[["City_norm", "UF", "Região"]], left_on="city_norm", right_on="City_norm", how="left")
     uf_counts = merged["UF"].fillna("NA").value_counts().rename_axis("UF").reset_index(name="Inscritos")
+    uf_counts["% brasileiros"] = uf_counts["Inscritos"].apply(lambda v: format_pct((v / total_brazil) * 100))
+    uf_counts = uf_counts.sort_values("Inscritos", ascending=False)
     reg_counts = merged["Região"].fillna("NA").value_counts().rename_axis("Regiao").reset_index(name="Inscritos")
 
+    st.subheader("Top Estados")
+    st.dataframe(uf_counts, hide_index=True, use_container_width=True)
+
+    st.subheader("Regioes do Brasil")
     col1, col2 = st.columns(2)
-    col1.plotly_chart(px.bar(uf_counts, x="UF", y="Inscritos"), use_container_width=True)
-    col2.plotly_chart(px.pie(reg_counts, names="Regiao", values="Inscritos", hole=0.4), use_container_width=True)
+    col1.dataframe(reg_counts.sort_values("Inscritos", ascending=False), hide_index=True, use_container_width=True)
+    pie = px.pie(reg_counts, names="Regiao", values="Inscritos", hole=0.4)
+    pie.update_layout(height=320)
+    col2.plotly_chart(pie, use_container_width=True)
+    st.caption("NA = cidades sem correspondencia no IBGE para mapeamento de regiao.")
 
 
 def render_international(df: pd.DataFrame) -> None:
@@ -410,10 +623,14 @@ def render_international(df: pd.DataFrame) -> None:
         st.info("Sem estrangeiros para o recorte atual.")
         return
 
-    nat_counts = intl["nationality_std"].fillna("NA").value_counts().head(15).rename_axis("Pais").reset_index(name="Inscritos")
-    st.plotly_chart(px.bar(nat_counts, x="Pais", y="Inscritos"), use_container_width=True)
+    total_inscritos = len(df)
+    nat_counts = intl["nationality_std"].fillna("NA").value_counts().rename_axis("Pais").reset_index(name="Inscritos")
+    top_5 = nat_counts.head(5).copy()
+    top_5["% dos inscritos totais"] = top_5["Inscritos"].apply(lambda v: format_pct((v / total_inscritos) * 100))
+    st.dataframe(top_5, hide_index=True, use_container_width=True)
     with st.expander("Lista completa de paises"):
-        full = intl["nationality_std"].fillna("NA").value_counts().rename_axis("Pais").reset_index(name="Inscritos")
+        full = nat_counts.copy()
+        full["% dos inscritos totais"] = full["Inscritos"].apply(lambda v: format_pct((v / total_inscritos) * 100))
         st.dataframe(full, hide_index=True, use_container_width=True)
 
 
@@ -448,10 +665,22 @@ def render_sales_patterns(df: pd.DataFrame) -> None:
     weekday_counts["weekday"] = pd.Categorical(weekday_counts["weekday"], categories=weekday_order, ordered=True)
     weekday_counts = weekday_counts.sort_values("weekday")
 
-    st.plotly_chart(px.bar(week_counts, x="week", y="Inscricoes", title="Ultimas 12 semanas"), use_container_width=True)
+    fig_week = px.bar(week_counts, x="week", y="Inscricoes", title="Ultimas 12 semanas", text="Inscricoes")
+    fig_week.update_traces(textposition="outside")
+    st.plotly_chart(fig_week, use_container_width=True)
     col1, col2 = st.columns(2)
-    col1.plotly_chart(px.bar(day_counts.tail(30), x="day", y="Inscricoes", title="Ultimos 30 dias"), use_container_width=True)
-    col2.plotly_chart(px.bar(weekday_counts, x="weekday", y="Inscricoes", title="Media por dia da semana"), use_container_width=True)
+    fig_days = px.bar(day_counts.tail(30), x="day", y="Inscricoes", title="Ultimos 30 dias", text="Inscricoes")
+    fig_days.update_traces(textposition="outside")
+    col1.plotly_chart(fig_days, use_container_width=True)
+    fig_weekday = px.bar(
+        weekday_counts,
+        x="weekday",
+        y="Inscricoes",
+        title="Media por dia da semana",
+        text="Inscricoes",
+    )
+    fig_weekday.update_traces(textposition="outside")
+    col2.plotly_chart(fig_weekday, use_container_width=True)
 
     day_counts["acumulado"] = day_counts["Inscricoes"].cumsum()
     st.plotly_chart(px.line(day_counts, x="day", y="acumulado", title="Inscricoes acumuladas"), use_container_width=True)
@@ -476,20 +705,33 @@ def render_financial(df: pd.DataFrame) -> None:
             receita_liquida=("net_revenue_brl", "sum"),
         )
         .reset_index()
-        .sort_values("receita_liquida", ascending=False)
     )
+    comp = sort_competitions(comp, "Competition")
     comp["ticket_medio"] = comp.apply(
         lambda row: row["receita_liquida"] / row["inscritos"] if row["inscritos"] else 0, axis=1
     )
-    st.dataframe(comp, hide_index=True, use_container_width=True)
+    comp_table = comp.rename(
+        columns={
+            "Competition": "Percurso",
+            "inscritos": "Inscritos",
+            "receita_bruta": "Receita Bruta (R$)",
+            "descontos": "Descontos (R$)",
+            "receita_liquida": "Receita Liquida (R$)",
+            "ticket_medio": "Ticket Medio (R$)",
+        }
+    )
+    for col in ["Inscritos", "Receita Bruta (R$)", "Descontos (R$)", "Receita Liquida (R$)", "Ticket Medio (R$)"]:
+        comp_table[col] = comp_table[col].map(format_int)
+    st.dataframe(comp_table, hide_index=True, use_container_width=True)
 
     if not comp.empty:
+        st.caption("% de contribuicao em receita de cada percurso")
         fig = px.pie(comp, names="Competition", values="receita_liquida", hole=0.45)
         fig.update_layout(height=360)
         st.plotly_chart(fig, use_container_width=True)
 
 
-def render_exports(raw_df: pd.DataFrame, kpi_df: pd.DataFrame, decisions: dict[str, str]) -> None:
+def render_exports(raw_df: pd.DataFrame, kpi_df: pd.DataFrame) -> None:
     st.header("Exportacoes")
     export_df = kpi_df.copy()
     csv_bytes = export_df.to_csv(index=False).encode("utf-8")
@@ -506,7 +748,6 @@ def render_exports(raw_df: pd.DataFrame, kpi_df: pd.DataFrame, decisions: dict[s
         "registros_kpi": int(len(kpi_df)),
         "receita_liquida_brl": float(kpi_df["net_revenue_brl"].sum()),
         "ticket_medio_brl": float(kpi_df["net_revenue_brl"].mean() if len(kpi_df) else 0),
-        "module_decisions": decisions,
     }
     json_bytes = json.dumps(summary, indent=2, ensure_ascii=False).encode("utf-8")
     st.download_button(
@@ -520,6 +761,7 @@ def render_exports(raw_df: pd.DataFrame, kpi_df: pd.DataFrame, decisions: dict[s
 
 def main() -> None:
     apply_theme()
+    apply_print_css()
     st.sidebar.title("Configuracoes 2026")
     st.sidebar.caption("Dashboard unico em Streamlit com upload manual BRL/USD.")
 
@@ -529,25 +771,22 @@ def main() -> None:
         accept_multiple_files=True,
     )
 
-    module_decisions = {}
-    st.sidebar.markdown("### Revisao por modulo")
-    for module in DEFAULT_MODULES:
-        module_decisions[module] = st.sidebar.selectbox(
-            f"{module}",
-            MODULE_DECISION_OPTIONS,
-            index=0,
-            key=f"decision_{module}",
+    st.sidebar.markdown("### Metas por percurso")
+    percurso_targets = {}
+    for percurso in PERCURSO_ORDER:
+        percurso_targets[percurso] = st.sidebar.number_input(
+            f"Meta {percurso}",
+            min_value=0,
+            value=DEFAULT_PERCURSO_TARGETS[percurso],
+            step=50,
         )
-
-    active_modules = [module for module, decision in module_decisions.items() if decision != "Remover"]
-
-    meta_total = st.sidebar.number_input("Meta total de inscritos", min_value=1, value=3500, step=50)
     start_date = st.sidebar.date_input("Inicio da campanha", value=date(2025, 10, 1))
     end_date = st.sidebar.date_input("Fim da campanha", value=date(2026, 9, 20))
+    if st.sidebar.button("Imprimir / Exportar PDF", use_container_width=True):
+        components.html("<script>window.print();</script>", height=0, width=0)
 
     if not uploaded_files:
         st.info("Envie as planilhas para iniciar o dashboard 2026.")
-        render_module_review(module_decisions)
         return
 
     dfs = [preprocess_uploaded_file(file) for file in uploaded_files]
@@ -556,13 +795,16 @@ def main() -> None:
 
     if filtered.empty:
         st.warning("Nao ha registros com `Registered status = True` no recorte atual.")
-        render_module_review(module_decisions)
         return
 
     data_base = filtered["Registration date"].max()
     data_base = data_base.date() if pd.notna(data_base) else date.today()
 
-    all_competitions = sorted(filtered["Competition"].dropna().unique().tolist())
+    known_competitions = [c for c in PERCURSO_ORDER if c in filtered["Competition"].dropna().unique().tolist()]
+    extra_competitions = sorted(
+        [c for c in filtered["Competition"].dropna().unique().tolist() if c not in PERCURSO_ORDER]
+    )
+    all_competitions = known_competitions + extra_competitions
     selected_competitions = st.sidebar.multiselect(
         "Filtrar competicoes",
         all_competitions,
@@ -581,29 +823,18 @@ def main() -> None:
     ].copy()
     if scoped.empty:
         st.warning("Os filtros atuais nao retornaram dados.")
-        render_module_review(module_decisions)
         return
 
     ibge_df = load_ibge()
+    st.markdown("<div id='print-content'>", unsafe_allow_html=True)
     render_header(scoped, data_base)
-    render_module_review(module_decisions)
-
-    if "Projecoes e ritmo de vendas" in active_modules:
-        render_progress_projection(scoped, meta_total, start_date, end_date)
-    if "Demografia" in active_modules:
-        render_demography(scoped)
-    if "Geografia Brasil" in active_modules:
-        render_geography(scoped, ibge_df)
-    if "Internacional" in active_modules:
-        render_international(scoped)
-    if "Comparativo historico" in active_modules:
-        render_historical(scoped)
-    if "Padroes de venda" in active_modules:
-        render_sales_patterns(scoped)
-    if "Financeiro" in active_modules:
-        render_financial(scoped)
-    if "Exportacoes" in active_modules:
-        render_exports(full_df, scoped, module_decisions)
+    render_progress_projection(scoped, percurso_targets, start_date, end_date)
+    render_demography(scoped)
+    render_geography(scoped, ibge_df)
+    render_international(scoped)
+    render_sales_patterns(scoped)
+    render_financial(scoped)
+    render_exports(full_df, scoped)
 
     with st.expander("Diagnostico tecnico dos uploads"):
         diag = (
@@ -614,6 +845,7 @@ def main() -> None:
             .sort_values("registros", ascending=False)
         )
         st.dataframe(diag, hide_index=True, use_container_width=True)
+    st.markdown("</div>", unsafe_allow_html=True)
 
 
 if __name__ == "__main__":
