@@ -706,6 +706,16 @@ with st.expander("Top 15 Dias de Maior Venda"):
     daily_counts['% acima da média'] = daily_counts['%_Acima_Media'].round(0).astype(int).astype(str) + '%'
     top15 = daily_counts.sort_values('Inscritos', ascending=False).head(15)[['Dia (dd/mm/aa)', 'Inscritos', '% acima da média']]
     st.table(top15)
+
+st.subheader("Inscrições Acumuladas - 2025")
+df_2025_acc = df_total[df_total['Ano'] == 2025].copy()
+df_2025_acc['Date'] = pd.to_datetime(df_2025_acc['Registration date'].dt.date)
+df_2025_acc = df_2025_acc.sort_values('Date')
+acc_daily = df_2025_acc.groupby('Date').size().reset_index(name='Inscritos')
+acc_daily['Acumulado'] = acc_daily['Inscritos'].cumsum()
+fig_acc = px.line(acc_daily, x='Date', y='Acumulado', title="Inscrições Acumuladas em 2025")
+st.plotly_chart(fig_acc)
+
 st.divider()
 page_break()
 
@@ -807,6 +817,33 @@ with st.expander("Detalhamento Financeiro"):
     revenue_by_competition['Total_Descontos'] = revenue_by_competition['Total_Descontos'].apply(lambda x: f"{int(round(x)):,}".replace(',', '.') if isinstance(x, (int, float)) else x)
     st.table(revenue_by_competition[[
         'Competition', 'Total Inscritos', 'Receita_Bruta', 'Receita_Líquida (com Cielo)', 'Total_Descontos']])
+
+# --- Gráfico de Pizza: Participação por Competição ---
+st.subheader("Participação por Competição (Inscrições Vendidas)")
+comp_sum = (
+    df_financial
+    .groupby('Competition')['Registration amount']
+    .sum()
+    .reset_index()
+)
+
+# Gráfico de pizza
+fig_pie = px.pie(
+    comp_sum,
+    names='Competition',
+    values='Registration amount',
+    title="Inscrições Vendidas por Competição (R$)"
+)
+
+# Texto dentro das fatias: label + percentual + valor formatado
+fig_pie.update_traces(
+    textposition='inside',
+    textinfo='label+percent+value',
+    texttemplate='%{label}<br>%{percent} – R$%{value:,.0f}',
+    hovertemplate='%{label}: R$%{value:,.0f} (%{percent})'
+)
+
+st.plotly_chart(fig_pie)
 
 # --- Tabela: Ticket Médio por Percurso ---
 st.subheader("Ticket Médio por Percurso (R$)")

@@ -1,0 +1,14 @@
+[theme]
+base = "light"
+primaryColor = "#19376D"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F7F9FC"
+textColor = "#111827"
+font = "sans serif"
+
+[server]
+headless = true
+port = 8501
+enableCORS = false
+enableXsrfProtection = true
+# Recomendado: subir com "python run_streamlit.py" (configura env no Mac M1).

@@ -1,0 +1,36 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Streamlit: dashboard (localhost)",
+      "type": "python",
+      "request": "launch",
+      "module": "streamlit",
+      "args": [
+        "run",
+        "streamlit_app.py",
+        "--server.port",
+        "8501",
+        "--server.headless",
+        "true"
+      ],
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "OPENBLAS_NUM_THREADS": "1",
+        "NUMEXPR_MAX_THREADS": "1",
+        "MKL_NUM_THREADS": "1",
+        "VECLIB_MAXIMUM_THREADS": "1",
+        "OMP_NUM_THREADS": "1"
+      },
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Streamlit: via run_streamlit.py",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/run_streamlit.py",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal"
+    }
+  ]
+}
