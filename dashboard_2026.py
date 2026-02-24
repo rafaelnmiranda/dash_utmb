@@ -242,6 +242,28 @@ def normalize_col_name(value: str) -> str:
     return norm_text(str(value)).replace(" ", "_")
 
 
+def find_column_by_candidates(columns, candidates: list[str]) -> str | None:
+    normalized_lookup = {normalize_col_name(col): col for col in columns}
+    for candidate in candidates:
+        candidate_norm = normalize_col_name(candidate)
+        if candidate_norm in normalized_lookup:
+            return normalized_lookup[candidate_norm]
+    return None
+
+
+def canonicalize_team_name(value: str) -> str:
+    raw = str(value).strip()
+    if not raw or raw.lower() in {"nan", "none"}:
+        return ""
+
+    cleaned = norm_text(raw)
+    cleaned = re.sub(r"\b(assessoria|corrida|running|team)\b", " ", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    if not cleaned:
+        cleaned = norm_text(raw)
+    return cleaned
+
+
 def parse_opt_in_series(series: pd.Series) -> pd.Series:
     numeric = pd.to_numeric(series, errors="coerce")
     numeric_flag = numeric.fillna(0).gt(0)
@@ -1048,6 +1070,78 @@ def render_horarios_venda(df: pd.DataFrame) -> None:
     p2.plotly_chart(fig_period, use_container_width=True)
 
 
+def render_team_medical_company(df: pd.DataFrame) -> None:
+    st.header("Assessorias, atestado e empresa")
+    total = len(df)
+    if total == 0:
+        st.info("Sem dados para analise de assessorias e cadastro.")
+        return
+
+    team_col = find_column_by_candidates(df.columns, ["Team", "Assessoria", "Assesoria", "Training team"])
+    medical_col = find_column_by_candidates(df.columns, ["medical_term", "medical term", "medical"])
+    company_col = find_column_by_candidates(df.columns, ["company", "empresa"])
+
+    # Indicadores de preenchimento de campos importantes para CRM/compliance.
+    if company_col:
+        company_txt = df[company_col].astype(str).str.strip()
+        company_filled_mask = (~company_txt.isin(["", "nan", "None", "none", "NaN"])) & company_txt.notna()
+        company_filled = int(company_filled_mask.sum())
+    else:
+        company_filled = 0
+
+    if medical_col:
+        medical_txt = df[medical_col].astype(str).str.strip()
+        medical_link_mask = medical_txt.str.contains(r"(https?://|www\.)", case=False, regex=True, na=False)
+        medical_uploaded = int(medical_link_mask.sum())
+    else:
+        medical_uploaded = 0
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Inscritos ativos", format_int(total))
+    c2.metric("Preencheram company", format_int(company_filled))
+    c2.caption(format_pct((company_filled / total) * 100 if total else 0))
+    c3.metric("Subiram atestado (medical_term)", format_int(medical_uploaded))
+    c3.caption(format_pct((medical_uploaded / total) * 100 if total else 0))
+
+    st.subheader("Top 10 assessorias (Team)")
+    if not team_col:
+        st.info("Coluna Team nao disponivel nesta base.")
+        return
+
+    team_raw = df[team_col].astype(str).str.strip()
+    valid_team = team_raw.replace({"nan": pd.NA, "None": pd.NA, "none": pd.NA, "": pd.NA}).dropna()
+    if valid_team.empty:
+        st.info("Nenhum valor de Team preenchido no recorte atual.")
+        return
+
+    team_df = valid_team.rename("team_raw").to_frame()
+    team_df["team_key"] = team_df["team_raw"].apply(canonicalize_team_name)
+    team_df = team_df[team_df["team_key"] != ""].copy()
+    if team_df.empty:
+        st.info("Nao foi possivel consolidar os nomes de Team.")
+        return
+
+    team_grouped = (
+        team_df.groupby("team_key", as_index=False)
+        .agg(
+            atletas=("team_raw", "size"),
+            assessoria=("team_raw", lambda s: s.value_counts().idxmax()),
+        )
+        .sort_values("atletas", ascending=False)
+        .head(10)
+        .reset_index(drop=True)
+    )
+    team_grouped["% dos inscritos"] = team_grouped["atletas"].apply(lambda v: format_pct((v / total) * 100 if total else 0))
+    team_grouped = team_grouped.rename(columns={"assessoria": "Assessoria", "atletas": "Atletas"})
+
+    t1, t2 = st.columns(2)
+    t1.dataframe(team_grouped[["Assessoria", "Atletas", "% dos inscritos"]], hide_index=True, use_container_width=True)
+    fig_team = px.bar(team_grouped, x="Assessoria", y="Atletas", text="Atletas", title="Top 10 assessorias inscritas")
+    fig_team.update_traces(textposition="outside")
+    fig_team.update_layout(height=360, xaxis_tickangle=-25)
+    t2.plotly_chart(fig_team, use_container_width=True)
+
+
 def render_perfil_inscrito(df: pd.DataFrame) -> None:
     st.header("Onibus Oficial")
     total = len(df)
@@ -1640,6 +1734,7 @@ def main() -> None:
         render_international(scoped)
         render_sales_patterns(scoped)
         render_horarios_venda(scoped)
+        render_team_medical_company(scoped)
         render_yopp_section(scoped, ibge_df)
         render_nubank_section(scoped, ibge_df)
         render_perfil_inscrito(scoped)
