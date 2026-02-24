@@ -493,7 +493,7 @@ def render_progress_projection(df: pd.DataFrame, targets: dict[str, int], start_
         use_container_width=True,
     )
 
-    # Gráfico: barras únicas com meta no topo e inscritos + % dentro; 7ª coluna = TOTAL
+    # Grafico 100% empilhado: todas as barras com mesma altura visual (0 a 100%)
     chart_summary = summary.copy()
     order_with_total = list(PERCURSO_ORDER) + ["TOTAL"]
     chart_summary["Percurso"] = pd.Categorical(
@@ -502,50 +502,57 @@ def render_progress_projection(df: pd.DataFrame, targets: dict[str, int], start_
         ordered=True,
     )
     chart_summary = chart_summary.sort_values("Percurso").reset_index(drop=True)
+    chart_summary["pct_meta_cap"] = chart_summary["pct_meta"].clip(lower=0, upper=100)
+    chart_summary["pct_restante"] = 100 - chart_summary["pct_meta_cap"]
     st.subheader("Metas por percurso (inscritos atuais)")
     fig_comp = go.Figure()
-    # Barra de fundo = meta (cinza)
+    # Parte restante ate 100% (cinza)
     fig_comp.add_trace(
         go.Bar(
             x=chart_summary["Percurso"],
-            y=chart_summary["meta"],
-            name="Meta",
+            y=chart_summary["pct_restante"],
+            name="Restante ate meta",
             marker_color="rgba(200, 200, 200, 0.5)",
-            text=None,
-            showlegend=False,
+            text=[f"Meta: {int(v)}" for v in chart_summary["meta"]],
+            textposition="none",
+            customdata=chart_summary[["meta", "inscritos", "pct_meta"]].values,
+            hovertemplate=(
+                "Percurso: %{x}<br>"
+                "Meta: %{customdata[0]}<br>"
+                "Inscritos: %{customdata[1]}<br>"
+                "% da meta: %{customdata[2]:.1f}%<extra></extra>"
+            ),
+            showlegend=True,
         )
     )
-    # Barra sobreposta = inscritos (azul), com texto dentro
+    # Parte inscrita (azul), limitada visualmente a 100%
     fig_comp.add_trace(
         go.Bar(
             x=chart_summary["Percurso"],
-            y=chart_summary["inscritos"],
+            y=chart_summary["pct_meta_cap"],
             name="Inscritos",
             text=[
-                f"{int(r['inscritos'])} ({format_pct(r['pct_meta'])})"
+                f"{int(r['inscritos'])}/{int(r['meta'])}<br>{format_pct(r['pct_meta'])}"
                 for _, r in chart_summary.iterrows()
             ],
             textposition="inside",
             marker_color="rgba(59, 130, 246, 0.9)",
-            showlegend=False,
-        )
-    )
-    # Número da meta no topo da barra
-    fig_comp.add_trace(
-        go.Scatter(
-            x=chart_summary["Percurso"],
-            y=chart_summary["meta"] * 1.03,
-            mode="text",
-            text=chart_summary["meta"].astype(int).astype(str),
-            textfont=dict(size=12, color="black"),
-            showlegend=False,
+            customdata=chart_summary[["meta", "inscritos", "pct_meta"]].values,
+            hovertemplate=(
+                "Percurso: %{x}<br>"
+                "Meta: %{customdata[0]}<br>"
+                "Inscritos: %{customdata[1]}<br>"
+                "% da meta: %{customdata[2]:.1f}%<extra></extra>"
+            ),
+            showlegend=True,
         )
     )
     fig_comp.update_layout(
         height=380,
-        barmode="overlay",
+        barmode="stack",
         xaxis={"categoryorder": "array", "categoryarray": order_with_total},
-        yaxis_title="Quantidade",
+        yaxis_title="% da meta",
+        yaxis=dict(range=[0, 100]),
         margin=dict(b=80),
     )
     st.plotly_chart(fig_comp, use_container_width=True)
