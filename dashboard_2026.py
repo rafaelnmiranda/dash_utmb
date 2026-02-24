@@ -1022,9 +1022,9 @@ def render_nubank_section(df: pd.DataFrame) -> None:
         st.info("Nao foi possivel identificar o arquivo de origem para aplicar o recorte BR_FULL.")
         return
 
-    br_full = df[df["source_file"].astype(str).str.contains("BR_FULL", case=False, na=False)].copy()
+    br_full = df[df["source_file"].astype(str).str.contains("BRL_FULL", case=False, na=False)].copy()
     if br_full.empty:
-        st.info("Nenhum registro BR_FULL encontrado no upload atual.")
+        st.info("Nenhum registro BRL_FULL encontrado no upload atual.")
         return
 
     nubank_buyers = br_full[br_full["nubank_flag"] > 0].copy()
@@ -1043,9 +1043,9 @@ def render_nubank_section(df: pd.DataFrame) -> None:
     max_age = valid_age.max() if not valid_age.empty else 0
 
     c1, c2, c3, c4, c5 = st.columns(5)
-    c1.metric("Inscritos BR_FULL", format_int(total_br_full))
+    c1.metric("Inscritos BRL_FULL", format_int(total_br_full))
     c2.metric("Compraram com Nubank", format_int(nubank_total))
-    c3.metric("% BR_FULL com Nubank", format_pct(nubank_pct))
+    c3.metric("% BRL_FULL com Nubank", format_pct(nubank_pct))
     c4.metric("Mulheres / Homens", f"{format_int(female_nubank)} / {format_int(male_nubank)}")
     c5.metric("Outros/NA", format_int(other_nubank))
 
@@ -1055,10 +1055,10 @@ def render_nubank_section(df: pd.DataFrame) -> None:
     a3.metric("Idade maxima", format_int(max_age))
 
     if nubank_buyers.empty:
-        st.info("Nenhum inscrito BR_FULL comprou com desconto Nubank no recorte atual.")
+        st.info("Nenhum inscrito BRL_FULL comprou com desconto Nubank no recorte atual.")
         return
 
-    st.subheader("Perfil de quem comprou com desconto Nubank (BR_FULL)")
+    st.subheader("Perfil de quem comprou com desconto Nubank (BRL_FULL)")
     p1, p2 = st.columns(2)
 
     gender_profile = pd.DataFrame(
