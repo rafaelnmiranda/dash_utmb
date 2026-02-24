@@ -8,6 +8,7 @@ from io import BytesIO
 import pandas as pd
 import plotly.express as px
 import plotly.figure_factory as ff
+import plotly.graph_objects as go
 import requests
 import streamlit as st
 import streamlit.components.v1 as components
@@ -51,11 +52,11 @@ REQUIRED_COLUMNS = [
 PERCURSO_ORDER = ["PTR 108", "PTR 58", "PTR 34", "PTR 25", "PTR 17", "RUN 7"]
 DEFAULT_PERCURSO_TARGETS = {
     "PTR 108": 400,
-    "PTR 58": 1000,
+    "PTR 58": 900,
     "PTR 34": 1000,
     "PTR 25": 1000,
     "PTR 17": 600,
-    "RUN 7": 1000,
+    "RUN 7": 600,
 }
 
 
@@ -398,9 +399,15 @@ def render_header(kpi_df: pd.DataFrame, data_base: date) -> None:
     c6.metric("Ticket medio", format_currency(avg_ticket))
     c7.metric("Pagaram com cartao Nubank", format_int(nubank_total))
 
+    YOPP_META_OCULOS = 300
+    pct_venda_yopp = (yopp_total / YOPP_META_OCULOS * 100) if YOPP_META_OCULOS else 0
+    pct_atletas_yopp = (yopp_total / total * 100) if total else 0
     y1, y2 = st.columns(2)
     y1.metric("Oculos Yopp vendidos", format_int(yopp_total))
-    y1.caption(f"BR: {format_int(yopp_br)} | Estrangeiros: {format_int(yopp_foreign)}")
+    y1.caption(
+        f"% meta venda ({YOPP_META_OCULOS} óculos): {format_pct(pct_venda_yopp)} | "
+        f"% atletas que compram: {format_pct(pct_atletas_yopp)} | Atletas totais: {format_int(total)}"
+    )
     y2.metric("Interessados no onibus oficial", format_int(bus_total))
     y2.caption(f"BR: {format_int(bus_br)} | Estrangeiros: {format_int(bus_foreign)}")
 
@@ -479,54 +486,71 @@ def render_progress_projection(df: pd.DataFrame, targets: dict[str, int], start_
     table["Meta"] = table["meta"].map(format_int)
     table["Inscritos atuais"] = table["inscritos"].map(format_int)
     table["% meta"] = table["pct_meta"].map(format_pct)
-    table["Receita bruta (R$)"] = table["receita_bruta"].map(format_int)
-    table["Descontos (R$)"] = table["descontos"].map(format_int)
-    table["Receita liquida (R$)"] = table["receita_liquida"].map(format_int)
     table["% mulheres"] = table["pct_mulheres"].map(format_pct)
     st.dataframe(
-        table[
-            [
-                "Percurso",
-                "Meta",
-                "Inscritos atuais",
-                "% meta",
-                "Receita liquida (R$)",
-                "Descontos (R$)",
-                "Receita bruta (R$)",
-                "% mulheres",
-            ]
-        ],
+        table[["Percurso", "Meta", "Inscritos atuais", "% meta", "% mulheres"]],
         hide_index=True,
         use_container_width=True,
     )
 
-    comp_counts = summary[summary["Percurso"] != "TOTAL"].copy()
+    # Gráfico: barras únicas com meta no topo e inscritos + % dentro; 7ª coluna = TOTAL
+    chart_summary = summary.copy()
+    order_with_total = list(PERCURSO_ORDER) + ["TOTAL"]
+    chart_summary["Percurso"] = pd.Categorical(
+        chart_summary["Percurso"],
+        categories=order_with_total,
+        ordered=True,
+    )
+    chart_summary = chart_summary.sort_values("Percurso").reset_index(drop=True)
     st.subheader("Metas por percurso (inscritos atuais)")
-    chart_df = comp_counts.rename(columns={"Percurso": "Competition", "inscritos": "Inscritos", "meta": "Meta"})
-    fig_comp = px.bar(
-        chart_df.melt(
-            id_vars=["Competition", "pct_meta"],
-            value_vars=["Inscritos", "Meta"],
-            var_name="Serie",
-            value_name="Quantidade",
-        ),
-        x="Competition",
-        y="Quantidade",
-        color="Serie",
-        barmode="group",
-        text="Quantidade",
-        category_orders={"Competition": PERCURSO_ORDER},
+    fig_comp = go.Figure()
+    # Barra de fundo = meta (cinza)
+    fig_comp.add_trace(
+        go.Bar(
+            x=chart_summary["Percurso"],
+            y=chart_summary["meta"],
+            name="Meta",
+            marker_color="rgba(200, 200, 200, 0.5)",
+            text=None,
+            showlegend=False,
+        )
     )
-    fig_comp.add_scatter(
-        x=chart_df["Competition"],
-        y=chart_df[["Inscritos", "Meta"]].max(axis=1) * 1.06,
-        mode="text",
-        text=chart_df["pct_meta"].map(format_pct),
-        showlegend=False,
+    # Barra sobreposta = inscritos (azul), com texto dentro
+    fig_comp.add_trace(
+        go.Bar(
+            x=chart_summary["Percurso"],
+            y=chart_summary["inscritos"],
+            name="Inscritos",
+            text=[
+                f"{int(r['inscritos'])} ({format_pct(r['pct_meta'])})"
+                for _, r in chart_summary.iterrows()
+            ],
+            textposition="inside",
+            marker_color="rgba(59, 130, 246, 0.9)",
+            showlegend=False,
+        )
     )
-    fig_comp.update_layout(height=380)
+    # Número da meta no topo da barra
+    fig_comp.add_trace(
+        go.Scatter(
+            x=chart_summary["Percurso"],
+            y=chart_summary["meta"] * 1.03,
+            mode="text",
+            text=chart_summary["meta"].astype(int).astype(str),
+            textfont=dict(size=12, color="black"),
+            showlegend=False,
+        )
+    )
+    fig_comp.update_layout(
+        height=380,
+        barmode="overlay",
+        xaxis={"categoryorder": "array", "categoryarray": order_with_total},
+        yaxis_title="Quantidade",
+        margin=dict(b=80),
+    )
     st.plotly_chart(fig_comp, use_container_width=True)
 
+    comp_counts = summary[summary["Percurso"] != "TOTAL"]
     meta_total = int(comp_counts["meta"].sum())
     total = len(df)
     elapsed_days = max((date.today() - start_date).days, 0)
@@ -780,8 +804,8 @@ def main() -> None:
             value=DEFAULT_PERCURSO_TARGETS[percurso],
             step=50,
         )
-    start_date = st.sidebar.date_input("Inicio da campanha", value=date(2025, 10, 1))
-    end_date = st.sidebar.date_input("Fim da campanha", value=date(2026, 9, 20))
+    start_date = st.sidebar.date_input("Inicio da campanha", value=date(2026, 2, 23))
+    end_date = st.sidebar.date_input("Fim da campanha", value=date(2026, 8, 14))
     if st.sidebar.button("Imprimir / Exportar PDF", use_container_width=True):
         components.html("<script>window.print();</script>", height=0, width=0)
 
@@ -797,30 +821,11 @@ def main() -> None:
         st.warning("Nao ha registros com `Registered status = True` no recorte atual.")
         return
 
+    # Data base do relatório: maior data de inscrição entre BR e US (já é o max do concat)
     data_base = filtered["Registration date"].max()
     data_base = data_base.date() if pd.notna(data_base) else date.today()
 
-    known_competitions = [c for c in PERCURSO_ORDER if c in filtered["Competition"].dropna().unique().tolist()]
-    extra_competitions = sorted(
-        [c for c in filtered["Competition"].dropna().unique().tolist() if c not in PERCURSO_ORDER]
-    )
-    all_competitions = known_competitions + extra_competitions
-    selected_competitions = st.sidebar.multiselect(
-        "Filtrar competicoes",
-        all_competitions,
-        default=all_competitions,
-    )
-    all_currencies = sorted(filtered["edition_currency"].dropna().unique().tolist())
-    selected_currencies = st.sidebar.multiselect(
-        "Filtrar moeda (Edition ID)",
-        all_currencies,
-        default=all_currencies,
-    )
-
-    scoped = filtered[
-        filtered["Competition"].isin(selected_competitions)
-        & filtered["edition_currency"].isin(selected_currencies)
-    ].copy()
+    scoped = filtered.copy()
     if scoped.empty:
         st.warning("Os filtros atuais nao retornaram dados.")
         return
