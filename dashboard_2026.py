@@ -62,9 +62,24 @@ DEFAULT_PERCURSO_TARGETS = {
 # Regras para classificar cupons pelo prefixo (3 primeiras letras).
 # Atualize este dicionario quando enviar a lista oficial de logica.
 COUPON_PREFIX_RULES = {
-    # "NUB": "Nubank",
-    # "YOP": "Yopp",
-    # "PAR": "Parcerias",
+    "IFL": "INFLUENCIADORES",
+    "IDS": "IDOSO",
+    "PCD": "PESSOA COM DEFICIENCIA",
+    "MDS": "MORADORES DE PARATY E REGIAO",
+    "PRA": "PREFEITURA (CORTESIAS)",
+    "CTA": "CORTESIA",
+    "ETE": "ATLETA DE ELITE",
+    "REM": "REMANEJADAS (VINDOS DE OUTROS ANOS)",
+    "VIP": "VIP",
+    "EXP": "EXPOSITORES",
+    "PAT": "PATROCINADORES",
+    "UPG": "UPGRADE (MUDANCA DE PERCURSO)",
+    "DWG": "DOWNGRADE (MUDANCA DE PERCURSO)",
+    "CPD": "CONTRAPARTIDA (PATROCINADORES E PARCEIROS)",
+    "IDX": "INDEX (DESCONTO PELO UTMB INDEX DO ATLETA)",
+    "NUB": "NUBANK (CONVIDADOS NUBANK OU AJUSTES DE PRECO)",
+    "CEX": "CONCESSAO EXCEPCIONAL (OUTROS)",
+    "COL": "COLLO (VENDA MANUAL PARA ARGENTINOS EM DOLAR)",
 }
 
 
