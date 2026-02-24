@@ -337,9 +337,7 @@ def preprocess_uploaded_file(uploaded_file) -> pd.DataFrame:
         df["yopp_flag"] = 0
 
     if "nubank_opt" in df.columns:
-        df["nubank_flag"] = df["nubank_opt"].astype(str).str.strip().str.lower().eq(
-            "yes, i will pay with a nubank card"
-        ).astype(int)
+        df["nubank_flag"] = parse_opt_in_series(df["nubank_opt"])
     else:
         df["nubank_flag"] = 0
 
@@ -877,40 +875,263 @@ def render_horarios_venda(df: pd.DataFrame) -> None:
 
 
 def render_perfil_inscrito(df: pd.DataFrame) -> None:
-    st.header("Perfil do inscrito")
+    st.header("Onibus Oficial")
     total = len(df)
     if total == 0:
-        st.info("Sem dados para perfil no recorte atual.")
+        st.info("Sem dados para analise de onibus oficial no recorte atual.")
         return
 
-    percurso_counts = df["Competition"].fillna("NA").value_counts().rename_axis("Percurso").reset_index(name="Inscritos")
-    order_map = {name: idx for idx, name in enumerate(PERCURSO_ORDER)}
-    percurso_counts["ordem"] = percurso_counts["Percurso"].map(order_map).fillna(999).astype(int)
-    percurso_counts = percurso_counts.sort_values(["ordem", "Percurso"]).drop(columns="ordem").reset_index(drop=True)
-    percurso_counts["% do total"] = percurso_counts["Inscritos"].apply(lambda v: format_pct((v / total) * 100))
+    if "official_bus_flag" not in df.columns:
+        st.info("Coluna de interesse no onibus oficial nao disponivel nesta base.")
+        return
 
-    st.subheader("Inscritos por percurso")
-    p1, p2 = st.columns(2)
-    p1.dataframe(percurso_counts, hide_index=True, use_container_width=True)
-    fig_percurso = px.bar(percurso_counts, x="Percurso", y="Inscritos", text="Inscritos")
-    fig_percurso.update_traces(textposition="outside")
-    fig_percurso.update_layout(height=340)
-    p2.plotly_chart(fig_percurso, use_container_width=True)
-
-    br_mask = df["nationality_std"].eq("BR") if "nationality_std" in df.columns else pd.Series(False, index=df.index)
-    yopp_total = int(df["yopp_flag"].sum()) if "yopp_flag" in df.columns else 0
-    yopp_pct = (yopp_total / total * 100) if total else 0
-    bus_total = int(df["official_bus_flag"].sum()) if "official_bus_flag" in df.columns else 0
+    interested = df[df["official_bus_flag"] > 0].copy()
+    bus_total = len(interested)
     bus_pct = (bus_total / total * 100) if total else 0
-    bus_br = int(df.loc[br_mask, "official_bus_flag"].sum()) if "official_bus_flag" in df.columns else 0
-    bus_foreign = int(df.loc[~br_mask, "official_bus_flag"].sum()) if "official_bus_flag" in df.columns else 0
+    br_mask = interested["nationality_std"].eq("BR") if "nationality_std" in interested.columns else pd.Series(False, index=interested.index)
+    bus_br = int(br_mask.sum())
+    bus_foreign = int((~br_mask).sum()) if "nationality_std" in interested.columns else 0
 
-    st.subheader("Engajamento")
-    e1, e2 = st.columns(2)
-    e1.metric("Oculos Yopp vendidos", format_int(yopp_total))
-    e1.caption(f"% dos inscritos: {format_pct(yopp_pct)}")
-    e2.metric("Interessados no onibus oficial", format_int(bus_total))
-    e2.caption(f"% dos inscritos: {format_pct(bus_pct)} | BR: {format_int(bus_br)} | Estrangeiros: {format_int(bus_foreign)}")
+    gender_raw = interested["gender"].astype(str).str.strip().str.upper() if "gender" in interested.columns else pd.Series(dtype="object")
+    female_bus = int(gender_raw.isin(["F", "FEMALE"]).sum()) if not gender_raw.empty else 0
+    male_bus = int(gender_raw.isin(["M", "MALE"]).sum()) if not gender_raw.empty else 0
+
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c1.metric("Interessados", format_int(bus_total))
+    c2.metric("% de inscritos interessados", format_pct(bus_pct))
+    c3.metric("Mulheres interessadas", format_int(female_bus))
+    c4.metric("Homens interessados", format_int(male_bus))
+    c5.metric("Brasileiros / Estrangeiros", f"{format_int(bus_br)} / {format_int(bus_foreign)}")
+
+    st.subheader("Interesse por percurso")
+    if interested.empty:
+        st.info("Nenhum interessado em onibus oficial no recorte atual.")
+    else:
+        percurso_counts = (
+            interested["Competition"]
+            .fillna("NA")
+            .value_counts()
+            .rename_axis("Percurso")
+            .reset_index(name="Interessados")
+        )
+        order_map = {name: idx for idx, name in enumerate(PERCURSO_ORDER)}
+        percurso_counts["ordem"] = percurso_counts["Percurso"].map(order_map).fillna(999).astype(int)
+        percurso_counts = percurso_counts.sort_values(["ordem", "Percurso"]).drop(columns="ordem").reset_index(drop=True)
+        percurso_counts["% dos interessados"] = percurso_counts["Interessados"].apply(
+            lambda v: format_pct((v / bus_total) * 100 if bus_total else 0)
+        )
+
+        p1, p2 = st.columns(2)
+        p1.dataframe(percurso_counts, hide_index=True, use_container_width=True)
+        fig_percurso = px.bar(percurso_counts, x="Percurso", y="Interessados", text="Interessados")
+        fig_percurso.update_traces(textposition="outside")
+        fig_percurso.update_layout(height=340)
+        p2.plotly_chart(fig_percurso, use_container_width=True)
+
+    st.subheader("Top 5 cidades com interesse")
+    if interested.empty:
+        st.info("Sem interessados para montar ranking de cidades.")
+        return
+
+    city_col = "city" if "city" in interested.columns else "city_norm"
+    top_cities = (
+        interested[city_col]
+        .astype(str)
+        .str.strip()
+        .replace({"": pd.NA, "nan": pd.NA, "NaN": pd.NA})
+        .dropna()
+        .value_counts()
+        .head(5)
+        .rename_axis("Cidade")
+        .reset_index(name="Interessados")
+    )
+    top_cities["% dos interessados"] = top_cities["Interessados"].apply(
+        lambda v: format_pct((v / bus_total) * 100 if bus_total else 0)
+    )
+    st.dataframe(top_cities, hide_index=True, use_container_width=True)
+
+
+def render_yopp_section(df: pd.DataFrame) -> None:
+    st.header("Yopp")
+    total = len(df)
+    if total == 0:
+        st.info("Sem dados para analise de Yopp no recorte atual.")
+        return
+
+    if "yopp_flag" not in df.columns:
+        st.info("Coluna Yopp nao disponivel nesta base.")
+        return
+
+    yopp_buyers = df[df["yopp_flag"] > 0].copy()
+    yopp_total = len(yopp_buyers)
+    pct_yopp = (yopp_total / total * 100) if total else 0
+
+    gender_raw = yopp_buyers["gender"].astype(str).str.strip().str.upper() if "gender" in yopp_buyers.columns else pd.Series(dtype="object")
+    female_yopp = int(gender_raw.isin(["F", "FEMALE"]).sum()) if not gender_raw.empty else 0
+    male_yopp = int(gender_raw.isin(["M", "MALE"]).sum()) if not gender_raw.empty else 0
+
+    br_mask = yopp_buyers["nationality_std"].eq("BR") if "nationality_std" in yopp_buyers.columns else pd.Series(False, index=yopp_buyers.index)
+    br_yopp = int(br_mask.sum())
+    foreign_yopp = int((~br_mask).sum()) if "nationality_std" in yopp_buyers.columns else 0
+
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c1.metric("Oculos vendidos", format_int(yopp_total))
+    c2.metric("% inscritos que compraram", format_pct(pct_yopp))
+    c3.metric("Mulheres", format_int(female_yopp))
+    c4.metric("Homens", format_int(male_yopp))
+    c5.metric("Brasileiros / Estrangeiros", f"{format_int(br_yopp)} / {format_int(foreign_yopp)}")
+
+    st.subheader("Oculos vendidos por percurso")
+    if yopp_buyers.empty:
+        st.info("Nenhum oculos Yopp vendido no recorte atual.")
+        return
+
+    yopp_by_course = (
+        yopp_buyers["Competition"]
+        .fillna("NA")
+        .value_counts()
+        .rename_axis("Percurso")
+        .reset_index(name="Oculos vendidos")
+    )
+    order_map = {name: idx for idx, name in enumerate(PERCURSO_ORDER)}
+    yopp_by_course["ordem"] = yopp_by_course["Percurso"].map(order_map).fillna(999).astype(int)
+    yopp_by_course = yopp_by_course.sort_values(["ordem", "Percurso"]).drop(columns="ordem").reset_index(drop=True)
+    yopp_by_course["% do total Yopp"] = yopp_by_course["Oculos vendidos"].apply(
+        lambda v: format_pct((v / yopp_total) * 100 if yopp_total else 0)
+    )
+
+    y1, y2 = st.columns(2)
+    y1.dataframe(yopp_by_course, hide_index=True, use_container_width=True)
+    fig_yopp = px.bar(yopp_by_course, x="Percurso", y="Oculos vendidos", text="Oculos vendidos")
+    fig_yopp.update_traces(textposition="outside")
+    fig_yopp.update_layout(height=340)
+    y2.plotly_chart(fig_yopp, use_container_width=True)
+
+
+def render_nubank_section(df: pd.DataFrame) -> None:
+    st.header("Nubank")
+    if df.empty:
+        st.info("Sem dados para analise de Nubank no recorte atual.")
+        return
+
+    if "nubank_flag" not in df.columns:
+        st.info("Coluna `nubank_opt` nao disponivel nesta base.")
+        return
+
+    if "source_file" not in df.columns:
+        st.info("Nao foi possivel identificar o arquivo de origem para aplicar o recorte BR_FULL.")
+        return
+
+    br_full = df[df["source_file"].astype(str).str.contains("BR_FULL", case=False, na=False)].copy()
+    if br_full.empty:
+        st.info("Nenhum registro BR_FULL encontrado no upload atual.")
+        return
+
+    nubank_buyers = br_full[br_full["nubank_flag"] > 0].copy()
+    nubank_total = len(nubank_buyers)
+    total_br_full = len(br_full)
+    nubank_pct = (nubank_total / total_br_full * 100) if total_br_full else 0
+
+    gender_raw = nubank_buyers["gender"].astype(str).str.strip().str.upper() if "gender" in nubank_buyers.columns else pd.Series(dtype="object")
+    female_nubank = int(gender_raw.isin(["F", "FEMALE"]).sum()) if not gender_raw.empty else 0
+    male_nubank = int(gender_raw.isin(["M", "MALE"]).sum()) if not gender_raw.empty else 0
+    other_nubank = max(nubank_total - female_nubank - male_nubank, 0)
+
+    valid_age = nubank_buyers["age"].dropna() if "age" in nubank_buyers.columns else pd.Series(dtype="float64")
+    avg_age = valid_age.mean() if not valid_age.empty else 0
+    min_age = valid_age.min() if not valid_age.empty else 0
+    max_age = valid_age.max() if not valid_age.empty else 0
+
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c1.metric("Inscritos BR_FULL", format_int(total_br_full))
+    c2.metric("Compraram com Nubank", format_int(nubank_total))
+    c3.metric("% BR_FULL com Nubank", format_pct(nubank_pct))
+    c4.metric("Mulheres / Homens", f"{format_int(female_nubank)} / {format_int(male_nubank)}")
+    c5.metric("Outros/NA", format_int(other_nubank))
+
+    a1, a2, a3 = st.columns(3)
+    a1.metric("Idade media (Nubank)", format_int(avg_age))
+    a2.metric("Idade minima", format_int(min_age))
+    a3.metric("Idade maxima", format_int(max_age))
+
+    if nubank_buyers.empty:
+        st.info("Nenhum inscrito BR_FULL comprou com desconto Nubank no recorte atual.")
+        return
+
+    st.subheader("Perfil de quem comprou com desconto Nubank (BR_FULL)")
+    p1, p2 = st.columns(2)
+
+    gender_profile = pd.DataFrame(
+        {
+            "Perfil": ["Feminino", "Masculino", "Outros/NA"],
+            "Inscritos": [female_nubank, male_nubank, other_nubank],
+        }
+    )
+    gender_profile["%"] = gender_profile["Inscritos"].apply(
+        lambda v: format_pct((v / nubank_total) * 100 if nubank_total else 0)
+    )
+    p1.dataframe(gender_profile, hide_index=True, use_container_width=True)
+
+    if not valid_age.empty:
+        age_labels = ["18-24", "25-34", "35-44", "45-54", "55+"]
+        age_bins = pd.cut(
+            valid_age,
+            bins=[17, 24, 34, 44, 54, 120],
+            labels=age_labels,
+            include_lowest=True,
+        )
+        age_counts = (
+            age_bins.value_counts()
+            .reindex(age_labels, fill_value=0)
+            .rename_axis("Faixa etaria")
+            .reset_index(name="Inscritos")
+        )
+        age_counts["%"] = age_counts["Inscritos"].apply(
+            lambda v: format_pct((v / nubank_total) * 100 if nubank_total else 0)
+        )
+        p2.dataframe(age_counts, hide_index=True, use_container_width=True)
+    else:
+        p2.info("Sem idades validas para montar faixas etarias.")
+
+    st.subheader("Compras Nubank por percurso")
+    by_route = (
+        nubank_buyers["Competition"]
+        .fillna("NA")
+        .value_counts()
+        .rename_axis("Percurso")
+        .reset_index(name="Inscritos")
+    )
+    order_map = {name: idx for idx, name in enumerate(PERCURSO_ORDER)}
+    by_route["ordem"] = by_route["Percurso"].map(order_map).fillna(999).astype(int)
+    by_route = by_route.sort_values(["ordem", "Percurso"]).drop(columns="ordem").reset_index(drop=True)
+    by_route["% do total Nubank"] = by_route["Inscritos"].apply(
+        lambda v: format_pct((v / nubank_total) * 100 if nubank_total else 0)
+    )
+    r1, r2 = st.columns(2)
+    r1.dataframe(by_route, hide_index=True, use_container_width=True)
+    fig_route = px.bar(by_route, x="Percurso", y="Inscritos", text="Inscritos")
+    fig_route.update_traces(textposition="outside")
+    fig_route.update_layout(height=320)
+    r2.plotly_chart(fig_route, use_container_width=True)
+
+    city_col = "city" if "city" in nubank_buyers.columns else "city_norm"
+    if city_col in nubank_buyers.columns:
+        st.subheader("Top 5 cidades (compras com desconto Nubank)")
+        top_cities = (
+            nubank_buyers[city_col]
+            .astype(str)
+            .str.strip()
+            .replace({"": pd.NA, "nan": pd.NA, "NaN": pd.NA})
+            .dropna()
+            .value_counts()
+            .head(5)
+            .rename_axis("Cidade")
+            .reset_index(name="Inscritos")
+        )
+        top_cities["% do total Nubank"] = top_cities["Inscritos"].apply(
+            lambda v: format_pct((v / nubank_total) * 100 if nubank_total else 0)
+        )
+        st.dataframe(top_cities, hide_index=True, use_container_width=True)
 
 
 def render_financial(df: pd.DataFrame) -> None:
@@ -1050,6 +1271,7 @@ def main() -> None:
         render_international(scoped)
         render_sales_patterns(scoped)
         render_financial(scoped)
+        render_nubank_section(scoped)
         render_exports(full_df, scoped)
     else:
         render_header_marketing(scoped, data_base)
@@ -1059,6 +1281,8 @@ def main() -> None:
         render_international(scoped)
         render_sales_patterns(scoped)
         render_horarios_venda(scoped)
+        render_yopp_section(scoped)
+        render_nubank_section(scoped)
         render_perfil_inscrito(scoped)
 
     with st.expander("Diagnostico tecnico dos uploads"):
