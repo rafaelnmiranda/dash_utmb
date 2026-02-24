@@ -240,12 +240,58 @@ def parse_opt_in_series(series: pd.Series) -> pd.Series:
     return (numeric_flag | text_flag).astype(int)
 
 
+def parse_nubank_series(series: pd.Series) -> pd.Series:
+    numeric = pd.to_numeric(series, errors="coerce")
+    numeric_flag = numeric.fillna(0).gt(0)
+    txt = series.astype(str).str.strip().str.lower()
+
+    positive_text = txt.isin(
+        {
+            "true",
+            "1",
+            "yes",
+            "y",
+            "sim",
+            "quero",
+            "interessado",
+            "interessada",
+            "yes, i will pay with a nubank card",
+            "yes, i will pay with nubank card",
+        }
+    )
+    negative_text = txt.isin(
+        {
+            "",
+            "0",
+            "false",
+            "no",
+            "nao",
+            "não",
+            "none",
+            "nan",
+            "n/a",
+            "na",
+            "-",
+        }
+    ) | txt.str.contains(r"\b(no|nao|não|not)\b", regex=True)
+    nubank_mention = txt.str.contains("nubank", na=False)
+    return (numeric_flag | positive_text | (nubank_mention & ~negative_text)).astype(int)
+
+
 def detect_official_bus_column(columns):
     for col in columns:
         col_norm = normalize_col_name(col)
         has_bus = any(token in col_norm for token in ["bus", "onibus", "transporte", "shuttle"])
         has_intent = any(token in col_norm for token in ["official", "oficial", "interesse", "interested", "opt"])
         if has_bus and has_intent:
+            return col
+    return None
+
+
+def detect_nubank_column(columns):
+    for col in columns:
+        col_norm = normalize_col_name(col)
+        if "nubank" in col_norm:
             return col
     return None
 
@@ -336,8 +382,9 @@ def preprocess_uploaded_file(uploaded_file) -> pd.DataFrame:
     else:
         df["yopp_flag"] = 0
 
-    if "nubank_opt" in df.columns:
-        df["nubank_flag"] = parse_opt_in_series(df["nubank_opt"])
+    nubank_col = "nubank_opt" if "nubank_opt" in df.columns else detect_nubank_column(df.columns)
+    if nubank_col:
+        df["nubank_flag"] = parse_nubank_series(df[nubank_col])
     else:
         df["nubank_flag"] = 0
 
@@ -1019,10 +1066,10 @@ def render_nubank_section(df: pd.DataFrame) -> None:
         return
 
     if "source_file" not in df.columns:
-        st.info("Nao foi possivel identificar o arquivo de origem para aplicar o recorte BR_FULL.")
+        st.info("Nao foi possivel identificar o arquivo de origem para aplicar o recorte BRL_FULL.")
         return
 
-    br_full = df[df["source_file"].astype(str).str.contains("BRL_FULL", case=False, na=False)].copy()
+    br_full = df[df["source_file"].astype(str).str.contains(r"brl[\s_-]*full", case=False, na=False, regex=True)].copy()
     if br_full.empty:
         st.info("Nenhum registro BRL_FULL encontrado no upload atual.")
         return
