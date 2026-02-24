@@ -59,6 +59,14 @@ DEFAULT_PERCURSO_TARGETS = {
     "RUN 7": 600,
 }
 
+# Regras para classificar cupons pelo prefixo (3 primeiras letras).
+# Atualize este dicionario quando enviar a lista oficial de logica.
+COUPON_PREFIX_RULES = {
+    # "NUB": "Nubank",
+    # "YOP": "Yopp",
+    # "PAR": "Parcerias",
+}
+
 
 def apply_theme() -> None:
     st.markdown(
@@ -296,6 +304,25 @@ def detect_nubank_column(columns):
     return None
 
 
+def detect_coupon_column(columns):
+    for col in columns:
+        col_norm = normalize_col_name(col)
+        has_coupon = any(token in col_norm for token in ["coupon", "cupom", "voucher", "promo", "discount_code"])
+        if has_coupon:
+            return col
+    return None
+
+
+def classify_coupon_prefix(code: str) -> str:
+    if pd.isna(code):
+        return "SEM_CUPOM"
+    clean = re.sub(r"[^A-Za-z0-9]", "", str(code).strip().upper())
+    if not clean:
+        return "SEM_CUPOM"
+    prefix = clean[:3]
+    return COUPON_PREFIX_RULES.get(prefix, f"OUTROS ({prefix})")
+
+
 def sort_competitions(df: pd.DataFrame, col_name: str) -> pd.DataFrame:
     local = df.copy()
     local["_order"] = pd.Categorical(local[col_name], categories=PERCURSO_ORDER, ordered=True)
@@ -309,6 +336,41 @@ def correct_city(city: str, ibge_df: pd.DataFrame, city_choices: list[str], cuto
     if matches:
         return ibge_df.loc[ibge_df["City_norm"] == matches[0], "City"].iat[0]
     return str(city)
+
+
+def build_top_cities_table(
+    df: pd.DataFrame,
+    ibge_df: pd.DataFrame,
+    total: int,
+    count_col: str,
+    pct_col: str,
+    top_n: int = 5,
+) -> pd.DataFrame:
+    city_col = "city" if "city" in df.columns else "city_norm"
+    if city_col not in df.columns:
+        return pd.DataFrame(columns=["Cidade", count_col, pct_col])
+
+    city_series = (
+        df[city_col]
+        .astype(str)
+        .str.strip()
+        .replace({"": pd.NA, "nan": pd.NA, "NaN": pd.NA})
+        .dropna()
+    )
+    if city_series.empty:
+        return pd.DataFrame(columns=["Cidade", count_col, pct_col])
+
+    if {"City", "City_norm"}.issubset(ibge_df.columns):
+        city_choices = ibge_df["City_norm"].tolist()
+        city_series = city_series.apply(lambda city: correct_city(city, ibge_df, city_choices))
+
+    top_cities = (
+        city_series.value_counts().head(top_n).rename_axis("Cidade").reset_index(name=count_col)
+    )
+    top_cities[pct_col] = top_cities[count_col].apply(
+        lambda value: format_pct((value / total) * 100 if total else 0)
+    )
+    return top_cities
 
 
 @st.cache_data(show_spinner=False)
@@ -404,6 +466,23 @@ def preprocess_uploaded_file(uploaded_file) -> pd.DataFrame:
         )
     else:
         df["bin_number"] = ""
+
+    coupon_col = detect_coupon_column(df.columns)
+    if coupon_col:
+        df["coupon_code"] = df[coupon_col].astype(str).str.strip()
+        df["coupon_code"] = df["coupon_code"].replace({"nan": "", "None": "", "none": ""})
+    else:
+        df["coupon_code"] = ""
+
+    df["coupon_prefix"] = (
+        df["coupon_code"]
+        .astype(str)
+        .str.upper()
+        .str.replace(r"[^A-Z0-9]", "", regex=True)
+        .str[:3]
+    )
+    df["coupon_prefix"] = df["coupon_prefix"].replace("", "SEM")
+    df["coupon_family"] = df["coupon_code"].apply(classify_coupon_prefix)
 
     for numeric_col in ["Registration amount", "Total registration amount", "Total discounts amount"]:
         df[numeric_col] = pd.to_numeric(df.get(numeric_col), errors="coerce").fillna(0)
@@ -514,6 +593,39 @@ def render_header_marketing(kpi_df: pd.DataFrame, data_base: date) -> None:
     y2.metric("Interessados no onibus oficial", format_int(bus_total))
     y2.caption(
         f"% dos inscritos: {format_pct(bus_pct)} | BR: {format_int(bus_br)} | Estrangeiros: {format_int(bus_foreign)}"
+    )
+
+
+def render_header_financial(kpi_df: pd.DataFrame, data_base: date) -> None:
+    total = len(kpi_df)
+    gross = float(kpi_df["total_registration_brl"].sum())
+    discounts = float(kpi_df["total_discounts_brl"].sum())
+    net = float(kpi_df["net_revenue_brl"].sum())
+    avg_ticket_net = (net / total) if total else 0
+    discount_rate = (discounts / gross * 100) if gross else 0
+    paying_with_discount = int(kpi_df["total_discounts_brl"].gt(0).sum())
+    pct_discount_orders = (paying_with_discount / total * 100) if total else 0
+
+    st.markdown(
+        f"""
+        <div class="hero">
+          <h2>Dashboard Financeiro 2026 - Paraty Brazil by UTMB</h2>
+          <p class="subtle">Base atualizada ate {data_base:%d/%m/%Y} | Foco em faturamento, descontos e ticket medio</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    c1, c2, c3, c4, c5, c6 = st.columns(6)
+    c1.metric("Inscritos ativos", format_int(total))
+    c2.metric("Faturamento total", format_currency(gross))
+    c3.metric("Descontos totais", format_currency(discounts))
+    c4.metric("Faturamento liquido", format_currency(net))
+    c5.metric("Ticket medio liquido", format_currency(avg_ticket_net))
+    c6.metric("% desconto sobre bruto", format_pct(discount_rate))
+    st.caption(
+        f"Inscricoes com desconto aplicado: {format_int(paying_with_discount)} "
+        f"({format_pct(pct_discount_orders)})"
     )
 
 
@@ -998,7 +1110,7 @@ def render_perfil_inscrito(df: pd.DataFrame) -> None:
     st.dataframe(top_cities, hide_index=True, use_container_width=True)
 
 
-def render_yopp_section(df: pd.DataFrame) -> None:
+def render_yopp_section(df: pd.DataFrame, ibge_df: pd.DataFrame) -> None:
     st.header("Yopp")
     total = len(df)
     if total == 0:
@@ -1054,8 +1166,21 @@ def render_yopp_section(df: pd.DataFrame) -> None:
     fig_yopp.update_layout(height=340)
     y2.plotly_chart(fig_yopp, use_container_width=True)
 
+    st.subheader("Top 5 cidades (Yopp)")
+    top_cities = build_top_cities_table(
+        yopp_buyers,
+        ibge_df=ibge_df,
+        total=yopp_total,
+        count_col="Oculos vendidos",
+        pct_col="% do total Yopp",
+    )
+    if top_cities.empty:
+        st.info("Sem cidades validas para montar ranking de Yopp.")
+    else:
+        st.dataframe(top_cities, hide_index=True, use_container_width=True)
 
-def render_nubank_section(df: pd.DataFrame) -> None:
+
+def render_nubank_section(df: pd.DataFrame, ibge_df: pd.DataFrame) -> None:
     st.header("Nubank")
     if df.empty:
         st.info("Sem dados para analise de Nubank no recorte atual.")
@@ -1161,23 +1286,17 @@ def render_nubank_section(df: pd.DataFrame) -> None:
     fig_route.update_layout(height=320)
     r2.plotly_chart(fig_route, use_container_width=True)
 
-    city_col = "city" if "city" in nubank_buyers.columns else "city_norm"
-    if city_col in nubank_buyers.columns:
-        st.subheader("Top 5 cidades (compras com desconto Nubank)")
-        top_cities = (
-            nubank_buyers[city_col]
-            .astype(str)
-            .str.strip()
-            .replace({"": pd.NA, "nan": pd.NA, "NaN": pd.NA})
-            .dropna()
-            .value_counts()
-            .head(5)
-            .rename_axis("Cidade")
-            .reset_index(name="Inscritos")
-        )
-        top_cities["% do total Nubank"] = top_cities["Inscritos"].apply(
-            lambda v: format_pct((v / nubank_total) * 100 if nubank_total else 0)
-        )
+    st.subheader("Top 5 cidades (compras com desconto Nubank)")
+    top_cities = build_top_cities_table(
+        nubank_buyers,
+        ibge_df=ibge_df,
+        total=nubank_total,
+        count_col="Inscritos",
+        pct_col="% do total Nubank",
+    )
+    if top_cities.empty:
+        st.info("Sem cidades validas para montar ranking de Nubank.")
+    else:
         st.dataframe(top_cities, hide_index=True, use_container_width=True)
 
 
@@ -1226,6 +1345,184 @@ def render_financial(df: pd.DataFrame) -> None:
         st.plotly_chart(fig, use_container_width=True)
 
 
+def render_financial_report(df: pd.DataFrame) -> None:
+    st.header("Visao consolidada financeira")
+    gross = float(df["total_registration_brl"].sum())
+    discounts = float(df["total_discounts_brl"].sum())
+    net = float(df["net_revenue_brl"].sum())
+    total_orders = len(df)
+    avg_gross = (gross / total_orders) if total_orders else 0
+    avg_net = (net / total_orders) if total_orders else 0
+    discount_rate = (discounts / gross * 100) if gross else 0
+    orders_with_discount = int(df["total_discounts_brl"].gt(0).sum())
+    pct_orders_with_discount = (orders_with_discount / total_orders * 100) if total_orders else 0
+
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric("Receita bruta total", format_currency(gross))
+    k2.metric("Receita liquida total", format_currency(net))
+    k3.metric("Ticket medio bruto", format_currency(avg_gross))
+    k4.metric("Ticket medio liquido", format_currency(avg_net))
+    k5, k6 = st.columns(2)
+    k5.metric("Taxa de desconto total", format_pct(discount_rate))
+    k6.metric("Inscricoes com cupom/desconto", format_pct(pct_orders_with_discount))
+
+    st.subheader("Performance por percurso")
+    by_route = (
+        df.groupby("Competition", dropna=False)
+        .agg(
+            inscritos=("Competition", "size"),
+            receita_bruta=("total_registration_brl", "sum"),
+            descontos=("total_discounts_brl", "sum"),
+            receita_liquida=("net_revenue_brl", "sum"),
+        )
+        .reset_index()
+    )
+    by_route = sort_competitions(by_route, "Competition")
+    by_route["ticket_medio_liquido"] = by_route.apply(
+        lambda row: row["receita_liquida"] / row["inscritos"] if row["inscritos"] else 0,
+        axis=1,
+    )
+    by_route["taxa_desconto"] = by_route.apply(
+        lambda row: (row["descontos"] / row["receita_bruta"] * 100) if row["receita_bruta"] else 0,
+        axis=1,
+    )
+
+    route_table = by_route.rename(
+        columns={
+            "Competition": "Percurso",
+            "inscritos": "Inscritos",
+            "receita_bruta": "Receita Bruta (R$)",
+            "descontos": "Descontos (R$)",
+            "receita_liquida": "Receita Liquida (R$)",
+            "ticket_medio_liquido": "Ticket Medio Liquido (R$)",
+            "taxa_desconto": "Taxa de Desconto",
+        }
+    )
+    route_table["Inscritos"] = route_table["Inscritos"].map(format_int)
+    for col in ["Receita Bruta (R$)", "Descontos (R$)", "Receita Liquida (R$)", "Ticket Medio Liquido (R$)"]:
+        route_table[col] = route_table[col].map(format_currency)
+    route_table["Taxa de Desconto"] = route_table["Taxa de Desconto"].map(format_pct)
+    st.dataframe(route_table, hide_index=True, use_container_width=True)
+
+    g1, g2 = st.columns(2)
+    fig_net_route = px.bar(
+        by_route,
+        x="Competition",
+        y="receita_liquida",
+        text="receita_liquida",
+        title="Receita liquida por percurso",
+    )
+    fig_net_route.update_traces(texttemplate="%{text:,.0f}", textposition="outside")
+    fig_net_route.update_layout(height=340)
+    g1.plotly_chart(fig_net_route, use_container_width=True)
+
+    fig_discount_route = px.bar(
+        by_route,
+        x="Competition",
+        y="taxa_desconto",
+        text="taxa_desconto",
+        title="Taxa de desconto por percurso",
+    )
+    fig_discount_route.update_traces(texttemplate="%{text:.1f}%", textposition="outside")
+    fig_discount_route.update_layout(height=340, yaxis_title="%")
+    g2.plotly_chart(fig_discount_route, use_container_width=True)
+
+    st.subheader("Evolucao diaria de faturamento")
+    dated = df.dropna(subset=["Registration date"]).copy()
+    if dated.empty:
+        st.info("Sem datas validas para evolucao diaria financeira.")
+    else:
+        dated["day"] = dated["Registration date"].dt.date
+        daily = (
+            dated.groupby("day")
+            .agg(
+                receita_bruta=("total_registration_brl", "sum"),
+                descontos=("total_discounts_brl", "sum"),
+                receita_liquida=("net_revenue_brl", "sum"),
+                inscritos=("day", "size"),
+            )
+            .reset_index()
+            .sort_values("day")
+        )
+        fig_daily = px.line(
+            daily,
+            x="day",
+            y=["receita_bruta", "descontos", "receita_liquida"],
+            labels={"day": "Data", "value": "Valor (R$)", "variable": "Serie"},
+        )
+        fig_daily.update_layout(height=360)
+        st.plotly_chart(fig_daily, use_container_width=True)
+
+    st.subheader("Estudo de cupons de desconto")
+    coupons = df[df["total_discounts_brl"] > 0].copy()
+    if coupons.empty:
+        st.info("Nenhuma inscricao com desconto no recorte atual.")
+        return
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Inscricoes com desconto", format_int(len(coupons)))
+    c2.metric("Total de desconto (R$)", format_currency(coupons["total_discounts_brl"].sum()))
+    c3.metric("Prefixos unicos (3 letras)", format_int(coupons["coupon_prefix"].nunique()))
+
+    by_family = (
+        coupons.groupby("coupon_family", dropna=False)
+        .agg(
+            inscricoes=("coupon_family", "size"),
+            desconto_total=("total_discounts_brl", "sum"),
+            receita_liquida=("net_revenue_brl", "sum"),
+        )
+        .reset_index()
+        .sort_values("desconto_total", ascending=False)
+    )
+    by_family["desconto_medio"] = by_family.apply(
+        lambda row: row["desconto_total"] / row["inscricoes"] if row["inscricoes"] else 0,
+        axis=1,
+    )
+    by_family["% do desconto total"] = by_family["desconto_total"].apply(
+        lambda value: format_pct((value / coupons["total_discounts_brl"].sum() * 100) if coupons["total_discounts_brl"].sum() else 0)
+    )
+
+    table_family = by_family.rename(
+        columns={
+            "coupon_family": "Familia de cupom",
+            "inscricoes": "Inscricoes",
+            "desconto_total": "Desconto Total (R$)",
+            "receita_liquida": "Receita Liquida (R$)",
+            "desconto_medio": "Desconto Medio (R$)",
+        }
+    )
+    table_family["Inscricoes"] = table_family["Inscricoes"].map(format_int)
+    for col in ["Desconto Total (R$)", "Receita Liquida (R$)", "Desconto Medio (R$)"]:
+        table_family[col] = table_family[col].map(format_currency)
+    st.dataframe(table_family, hide_index=True, use_container_width=True)
+
+    top_prefix = (
+        coupons.groupby("coupon_prefix", dropna=False)
+        .agg(
+            inscricoes=("coupon_prefix", "size"),
+            desconto_total=("total_discounts_brl", "sum"),
+        )
+        .reset_index()
+        .sort_values("desconto_total", ascending=False)
+        .head(12)
+    )
+    fig_prefix = px.bar(
+        top_prefix,
+        x="coupon_prefix",
+        y="desconto_total",
+        text="desconto_total",
+        title="Top prefixos por desconto total",
+    )
+    fig_prefix.update_traces(texttemplate="%{text:,.0f}", textposition="outside")
+    fig_prefix.update_layout(height=330, xaxis_title="Prefixo (3 letras)", yaxis_title="Desconto total (R$)")
+    st.plotly_chart(fig_prefix, use_container_width=True)
+
+    st.caption(
+        "Classificacao atual usa `COUPON_PREFIX_RULES`. "
+        "Quando voce enviar a lista oficial, basta mapear cada prefixo no dicionario."
+    )
+
+
 def render_exports(raw_df: pd.DataFrame, kpi_df: pd.DataFrame) -> None:
     st.header("Exportacoes")
     export_df = kpi_df.copy()
@@ -1268,7 +1565,7 @@ def main() -> None:
     st.sidebar.markdown("---")
     tipo_relatorio = st.sidebar.radio(
         "Selecione o relatorio",
-        options=["Geral", "Marketing"],
+        options=["Geral", "Marketing", "Financeiro"],
         index=0,
         label_visibility="collapsed",
     )
@@ -1318,9 +1615,9 @@ def main() -> None:
         render_international(scoped)
         render_sales_patterns(scoped)
         render_financial(scoped)
-        render_nubank_section(scoped)
+        render_nubank_section(scoped, ibge_df)
         render_exports(full_df, scoped)
-    else:
+    elif tipo_relatorio == "Marketing":
         render_header_marketing(scoped, data_base)
         render_progress_projection(scoped, percurso_targets, start_date, end_date)
         render_demography(scoped, expandido=True)
@@ -1328,9 +1625,13 @@ def main() -> None:
         render_international(scoped)
         render_sales_patterns(scoped)
         render_horarios_venda(scoped)
-        render_yopp_section(scoped)
-        render_nubank_section(scoped)
+        render_yopp_section(scoped, ibge_df)
+        render_nubank_section(scoped, ibge_df)
         render_perfil_inscrito(scoped)
+    else:
+        render_header_financial(scoped, data_base)
+        render_financial_report(scoped)
+        render_exports(full_df, scoped)
 
     with st.expander("Diagnostico tecnico dos uploads"):
         diag = (
