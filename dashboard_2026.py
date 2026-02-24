@@ -297,6 +297,25 @@ def preprocess_uploaded_file(uploaded_file) -> pd.DataFrame:
     df["Registration date"] = pd.to_datetime(df.get("Registration date"), errors="coerce")
     df["birthdate"] = pd.to_datetime(df.get("birthdate"), errors="coerce")
     df["Ano"] = df["Registration date"].dt.year.fillna(2026).astype(int)
+    if "date_time" in df.columns:
+        parsed_date_time = pd.to_datetime(df["date_time"], format="%d-%m-%Y %H:%M:%S", errors="coerce")
+        fallback_mask = parsed_date_time.isna() & df["date_time"].notna()
+        if fallback_mask.any():
+            parsed_date_time.loc[fallback_mask] = pd.to_datetime(
+                df.loc[fallback_mask, "date_time"],
+                errors="coerce",
+                dayfirst=True,
+            )
+        df["date_time_parsed"] = parsed_date_time
+    else:
+        df["date_time_parsed"] = pd.NaT
+    df["sale_hour"] = df["date_time_parsed"].dt.hour
+    df["sale_period"] = pd.cut(
+        df["sale_hour"],
+        bins=[-0.1, 5.9, 11.9, 17.9, 23.9],
+        labels=["Madrugada", "Manha", "Tarde", "Noite"],
+    ).astype("object")
+    df["sale_period"] = df["sale_period"].fillna("Sem horario")
 
     df["edition_currency"] = df.get("Edition ID").apply(parse_currency_from_edition)
     if (df["edition_currency"] == "UNKNOWN").any():
@@ -410,6 +429,47 @@ def render_header(kpi_df: pd.DataFrame, data_base: date) -> None:
     )
     y2.metric("Interessados no onibus oficial", format_int(bus_total))
     y2.caption(f"BR: {format_int(bus_br)} | Estrangeiros: {format_int(bus_foreign)}")
+
+
+def render_header_marketing(kpi_df: pd.DataFrame, data_base: date) -> None:
+    total = len(kpi_df)
+    female = kpi_df["gender"].astype(str).str.upper().isin(["F", "FEMALE"]).sum() if "gender" in kpi_df.columns else 0
+    pct_female = (female / total * 100) if total else 0
+    foreigners = kpi_df[kpi_df["nationality_std"] != "BR"].shape[0] if "nationality_std" in kpi_df.columns else 0
+    pct_foreigners = (foreigners / total * 100) if total else 0
+    countries = kpi_df["country_std"].replace({"": pd.NA, "NAN": pd.NA}).dropna().nunique()
+    br_mask = kpi_df["nationality_std"].eq("BR")
+    foreign_mask = ~br_mask
+    yopp_total = int(kpi_df["yopp_flag"].sum()) if "yopp_flag" in kpi_df.columns else 0
+    bus_total = int(kpi_df["official_bus_flag"].sum()) if "official_bus_flag" in kpi_df.columns else 0
+    bus_br = int(kpi_df.loc[br_mask, "official_bus_flag"].sum()) if "official_bus_flag" in kpi_df.columns else 0
+    bus_foreign = int(kpi_df.loc[foreign_mask, "official_bus_flag"].sum()) if "official_bus_flag" in kpi_df.columns else 0
+
+    st.markdown(
+        f"""
+        <div class="hero">
+          <h2>Dashboard Marketing 2026 - Paraty Brazil by UTMB</h2>
+          <p class="subtle">Base atualizada ate {data_base:%d/%m/%Y} | Visao de audiencia, perfil e ritmo</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Inscritos ativos", format_int(total))
+    c2.metric("% mulheres", format_pct(pct_female))
+    c3.metric("% estrangeiros", format_pct(pct_foreigners))
+    c4.metric("Paises distintos", format_int(countries))
+
+    yopp_pct = (yopp_total / total * 100) if total else 0
+    bus_pct = (bus_total / total * 100) if total else 0
+    y1, y2 = st.columns(2)
+    y1.metric("Oculos Yopp vendidos", format_int(yopp_total))
+    y1.caption(f"% dos inscritos: {format_pct(yopp_pct)}")
+    y2.metric("Interessados no onibus oficial", format_int(bus_total))
+    y2.caption(
+        f"% dos inscritos: {format_pct(bus_pct)} | BR: {format_int(bus_br)} | Estrangeiros: {format_int(bus_foreign)}"
+    )
 
 
 def build_route_summary(df: pd.DataFrame, targets: dict[str, int]) -> pd.DataFrame:
@@ -599,7 +659,7 @@ def render_progress_projection(df: pd.DataFrame, targets: dict[str, int], start_
     st.plotly_chart(fig_mm, use_container_width=True)
 
 
-def render_demography(df: pd.DataFrame) -> None:
+def render_demography(df: pd.DataFrame, expandido: bool = False) -> None:
     st.header("Demografia")
     valid_age = df["age"].dropna()
     c1, c2, c3 = st.columns(3)
@@ -611,6 +671,54 @@ def render_demography(df: pd.DataFrame) -> None:
         hist = ff.create_distplot([valid_age], ["Idade"], show_hist=True, show_rug=False, bin_size=2)
         hist.update_layout(height=320)
         st.plotly_chart(hist, use_container_width=True)
+
+    if not expandido:
+        return
+
+    st.subheader("Genero")
+    if "gender" not in df.columns:
+        st.info("Coluna de genero nao disponivel para analise.")
+    else:
+        gender_raw = df["gender"].astype(str).str.strip().str.upper()
+        gender_norm = pd.Series("Outros/NA", index=df.index, dtype="object")
+        gender_norm.loc[gender_raw.isin(["F", "FEMALE"])] = "Feminino"
+        gender_norm.loc[gender_raw.isin(["M", "MALE"])] = "Masculino"
+        gender_counts = gender_norm.value_counts().rename_axis("Genero").reset_index(name="Inscritos")
+        total_gender = gender_counts["Inscritos"].sum()
+        gender_counts["%"] = gender_counts["Inscritos"].apply(
+            lambda v: format_pct((v / total_gender) * 100 if total_gender else 0)
+        )
+        col_a, col_b = st.columns(2)
+        col_a.dataframe(gender_counts, hide_index=True, use_container_width=True)
+        pie_gender = px.pie(gender_counts, names="Genero", values="Inscritos", hole=0.45)
+        pie_gender.update_layout(height=320)
+        col_b.plotly_chart(pie_gender, use_container_width=True)
+
+    st.subheader("Faixas etarias")
+    if valid_age.empty:
+        st.info("Sem dados de idade para montar faixas etarias.")
+    else:
+        age_labels = ["18-24", "25-34", "35-44", "45-54", "55+"]
+        age_bins = pd.cut(
+            valid_age,
+            bins=[17, 24, 34, 44, 54, 120],
+            labels=age_labels,
+            include_lowest=True,
+        )
+        age_counts = (
+            age_bins.value_counts()
+            .reindex(age_labels, fill_value=0)
+            .rename_axis("Faixa")
+            .reset_index(name="Inscritos")
+        )
+        total_age = age_counts["Inscritos"].sum()
+        age_counts["%"] = age_counts["Inscritos"].apply(lambda v: format_pct((v / total_age) * 100 if total_age else 0))
+        col_c, col_d = st.columns(2)
+        col_c.dataframe(age_counts, hide_index=True, use_container_width=True)
+        fig_age = px.bar(age_counts, x="Faixa", y="Inscritos", text="Inscritos")
+        fig_age.update_traces(textposition="outside")
+        fig_age.update_layout(height=320)
+        col_d.plotly_chart(fig_age, use_container_width=True)
 
 
 def render_geography(df: pd.DataFrame, ibge_df: pd.DataFrame) -> None:
@@ -717,6 +825,94 @@ def render_sales_patterns(df: pd.DataFrame) -> None:
     st.plotly_chart(px.line(day_counts, x="day", y="acumulado", title="Inscricoes acumuladas"), use_container_width=True)
 
 
+def render_horarios_venda(df: pd.DataFrame) -> None:
+    st.header("Horarios de venda")
+    if "date_time_parsed" not in df.columns:
+        st.info("Coluna date_time nao disponivel para analise de horarios.")
+        return
+
+    local = df.dropna(subset=["date_time_parsed"]).copy()
+    if local.empty:
+        st.info("Sem registros validos em date_time para analise de horarios.")
+        return
+
+    if "sale_hour" not in local.columns:
+        local["sale_hour"] = local["date_time_parsed"].dt.hour
+    hour_counts = local.groupby("sale_hour").size().reindex(range(24), fill_value=0).reset_index(name="Inscricoes")
+    hour_counts = hour_counts.rename(columns={"sale_hour": "Hora"})
+    peak_hour = int(hour_counts.loc[hour_counts["Inscricoes"].idxmax(), "Hora"])
+    peak_count = int(hour_counts["Inscricoes"].max())
+    c1, c2 = st.columns(2)
+    c1.metric("Horario de pico", f"{peak_hour:02d}h")
+    c2.metric("Inscricoes no pico", format_int(peak_count))
+
+    fig_hour = px.bar(hour_counts, x="Hora", y="Inscricoes", text="Inscricoes", title="Inscricoes por hora do dia")
+    fig_hour.update_traces(textposition="outside")
+    fig_hour.update_layout(height=340, xaxis=dict(dtick=1))
+    st.plotly_chart(fig_hour, use_container_width=True)
+
+    if "sale_period" not in local.columns:
+        local["sale_period"] = pd.cut(
+            local["sale_hour"],
+            bins=[-0.1, 5.9, 11.9, 17.9, 23.9],
+            labels=["Madrugada", "Manha", "Tarde", "Noite"],
+        ).astype("object")
+        local["sale_period"] = local["sale_period"].fillna("Sem horario")
+    period_order = ["Madrugada", "Manha", "Tarde", "Noite", "Sem horario"]
+    period_counts = local["sale_period"].value_counts().reindex(period_order, fill_value=0).rename_axis("Periodo")
+    period_counts = period_counts.reset_index(name="Inscritos")
+    total_period = int(period_counts["Inscritos"].sum())
+    period_counts["%"] = period_counts["Inscritos"].apply(
+        lambda v: format_pct((v / total_period) * 100 if total_period else 0)
+    )
+
+    top_period = period_counts.sort_values("Inscritos", ascending=False).iloc[0]
+    st.metric("Maior volume por periodo", f"{top_period['Periodo']} ({format_int(top_period['Inscritos'])})")
+    p1, p2 = st.columns(2)
+    p1.dataframe(period_counts, hide_index=True, use_container_width=True)
+    fig_period = px.bar(period_counts, x="Periodo", y="Inscritos", text="Inscritos", title="Inscricoes por periodo do dia")
+    fig_period.update_traces(textposition="outside")
+    fig_period.update_layout(height=320)
+    p2.plotly_chart(fig_period, use_container_width=True)
+
+
+def render_perfil_inscrito(df: pd.DataFrame) -> None:
+    st.header("Perfil do inscrito")
+    total = len(df)
+    if total == 0:
+        st.info("Sem dados para perfil no recorte atual.")
+        return
+
+    percurso_counts = df["Competition"].fillna("NA").value_counts().rename_axis("Percurso").reset_index(name="Inscritos")
+    order_map = {name: idx for idx, name in enumerate(PERCURSO_ORDER)}
+    percurso_counts["ordem"] = percurso_counts["Percurso"].map(order_map).fillna(999).astype(int)
+    percurso_counts = percurso_counts.sort_values(["ordem", "Percurso"]).drop(columns="ordem").reset_index(drop=True)
+    percurso_counts["% do total"] = percurso_counts["Inscritos"].apply(lambda v: format_pct((v / total) * 100))
+
+    st.subheader("Inscritos por percurso")
+    p1, p2 = st.columns(2)
+    p1.dataframe(percurso_counts, hide_index=True, use_container_width=True)
+    fig_percurso = px.bar(percurso_counts, x="Percurso", y="Inscritos", text="Inscritos")
+    fig_percurso.update_traces(textposition="outside")
+    fig_percurso.update_layout(height=340)
+    p2.plotly_chart(fig_percurso, use_container_width=True)
+
+    br_mask = df["nationality_std"].eq("BR") if "nationality_std" in df.columns else pd.Series(False, index=df.index)
+    yopp_total = int(df["yopp_flag"].sum()) if "yopp_flag" in df.columns else 0
+    yopp_pct = (yopp_total / total * 100) if total else 0
+    bus_total = int(df["official_bus_flag"].sum()) if "official_bus_flag" in df.columns else 0
+    bus_pct = (bus_total / total * 100) if total else 0
+    bus_br = int(df.loc[br_mask, "official_bus_flag"].sum()) if "official_bus_flag" in df.columns else 0
+    bus_foreign = int(df.loc[~br_mask, "official_bus_flag"].sum()) if "official_bus_flag" in df.columns else 0
+
+    st.subheader("Engajamento")
+    e1, e2 = st.columns(2)
+    e1.metric("Oculos Yopp vendidos", format_int(yopp_total))
+    e1.caption(f"% dos inscritos: {format_pct(yopp_pct)}")
+    e2.metric("Interessados no onibus oficial", format_int(bus_total))
+    e2.caption(f"% dos inscritos: {format_pct(bus_pct)} | BR: {format_int(bus_br)} | Estrangeiros: {format_int(bus_foreign)}")
+
+
 def render_financial(df: pd.DataFrame) -> None:
     st.header("Financeiro")
     gross = df["total_registration_brl"].sum()
@@ -801,6 +997,13 @@ def main() -> None:
         type=["xlsx"],
         accept_multiple_files=True,
     )
+    st.sidebar.markdown("---")
+    tipo_relatorio = st.sidebar.radio(
+        "Selecione o relatorio",
+        options=["Geral", "Marketing"],
+        index=0,
+        label_visibility="collapsed",
+    )
 
     st.sidebar.markdown("### Metas por percurso")
     percurso_targets = {}
@@ -839,14 +1042,24 @@ def main() -> None:
 
     ibge_df = load_ibge()
     st.markdown("<div id='print-content'>", unsafe_allow_html=True)
-    render_header(scoped, data_base)
-    render_progress_projection(scoped, percurso_targets, start_date, end_date)
-    render_demography(scoped)
-    render_geography(scoped, ibge_df)
-    render_international(scoped)
-    render_sales_patterns(scoped)
-    render_financial(scoped)
-    render_exports(full_df, scoped)
+    if tipo_relatorio == "Geral":
+        render_header(scoped, data_base)
+        render_progress_projection(scoped, percurso_targets, start_date, end_date)
+        render_demography(scoped)
+        render_geography(scoped, ibge_df)
+        render_international(scoped)
+        render_sales_patterns(scoped)
+        render_financial(scoped)
+        render_exports(full_df, scoped)
+    else:
+        render_header_marketing(scoped, data_base)
+        render_progress_projection(scoped, percurso_targets, start_date, end_date)
+        render_demography(scoped, expandido=True)
+        render_geography(scoped, ibge_df)
+        render_international(scoped)
+        render_sales_patterns(scoped)
+        render_horarios_venda(scoped)
+        render_perfil_inscrito(scoped)
 
     with st.expander("Diagnostico tecnico dos uploads"):
         diag = (
