@@ -657,6 +657,10 @@ def render_venn_unique_athletes(df_2026_all_rows: pd.DataFrame) -> None:
     }
     totals = {edition: len(values) for edition, values in venn_sets.items()}
     membership = compute_membership_distribution(venn_sets)
+    previous_editions = venn_sets["2023"] | venn_sets["2024"] | venn_sets["2025"]
+    returning_2026 = len(venn_sets["2026"] & previous_editions)
+    return_rate_2026 = (returning_2026 / totals["2026"] * 100) if totals["2026"] else 0
+    new_2026 = totals["2026"] - returning_2026
 
     circle_layout = {
         "2023": {"x": 0.34, "y": 0.60, "color": "rgba(59,130,246,0.25)", "stroke": "#3b82f6"},
@@ -708,6 +712,10 @@ def render_venn_unique_athletes(df_2026_all_rows: pd.DataFrame) -> None:
         plot_bgcolor="white",
     )
     st.plotly_chart(fig, use_container_width=True)
+
+    k1, k2 = st.columns(2)
+    k1.metric("Taxa de retorno 2026", format_pct(return_rate_2026))
+    k2.metric("Atletas retornantes 2026", format_int(returning_2026), delta=f"Novos: {format_int(new_2026)}")
 
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("So em 1 edicao", format_int(membership[1]))
