@@ -662,56 +662,38 @@ def render_venn_unique_athletes(df_2026_all_rows: pd.DataFrame) -> None:
     return_rate_2026 = (returning_2026 / totals["2026"] * 100) if totals["2026"] else 0
     new_2026 = totals["2026"] - returning_2026
 
-    circle_layout = {
-        "2023": {"x": 0.34, "y": 0.60, "color": "rgba(59,130,246,0.25)", "stroke": "#3b82f6"},
-        "2024": {"x": 0.56, "y": 0.60, "color": "rgba(16,185,129,0.25)", "stroke": "#10b981"},
-        "2025": {"x": 0.44, "y": 0.42, "color": "rgba(245,158,11,0.25)", "stroke": "#f59e0b"},
-        "2026": {"x": 0.66, "y": 0.42, "color": "rgba(239,68,68,0.25)", "stroke": "#ef4444"},
-    }
-    radius = 0.22
+    t1, t2, t3, t4 = st.columns(4)
+    t1.metric("Total unicos 2023", format_int(totals["2023"]))
+    t2.metric("Total unicos 2024", format_int(totals["2024"]))
+    t3.metric("Total unicos 2025", format_int(totals["2025"]))
+    t4.metric("Total unicos 2026", format_int(totals["2026"]))
 
-    fig = go.Figure()
-    for edition, layout in circle_layout.items():
-        fig.add_shape(
-            type="circle",
-            xref="paper",
-            yref="paper",
-            x0=layout["x"] - radius,
-            y0=layout["y"] - radius,
-            x1=layout["x"] + radius,
-            y1=layout["y"] + radius,
-            fillcolor=layout["color"],
-            line=dict(color=layout["stroke"], width=2),
-        )
-        fig.add_annotation(
-            x=layout["x"],
-            y=layout["y"] + radius + 0.08,
-            xref="paper",
-            yref="paper",
-            text=f"{edition}<br>Total: {format_int(totals[edition])}",
-            showarrow=False,
-            align="center",
-            font=dict(size=12),
-        )
+    editions = ["2023", "2024", "2025", "2026"]
+    universe = set().union(*venn_sets.values())
+    combo_counts: dict[tuple[bool, bool, bool, bool], int] = {}
+    for email in universe:
+        key = tuple(email in venn_sets[edition] for edition in editions)
+        combo_counts[key] = combo_counts.get(key, 0) + 1
 
-    fig.add_annotation(
-        x=0.50,
-        y=0.52,
-        xref="paper",
-        yref="paper",
-        text="Sobreposicao por e-mail",
-        showarrow=False,
-        font=dict(size=12, color="#334155"),
+    venn_table_rows = []
+    for key, count in combo_counts.items():
+        present = [edition for edition, flag in zip(editions, key) if flag]
+        if not present:
+            continue
+        venn_table_rows.append(
+            {
+                "Participacao": " + ".join(present),
+                "Qtde atletas unicos": count,
+                "N edicoes": len(present),
+            }
+        )
+    venn_table = pd.DataFrame(venn_table_rows).sort_values(
+        ["N edicoes", "Qtde atletas unicos", "Participacao"],
+        ascending=[False, False, True],
     )
-    fig.update_layout(
-        height=520,
-        margin=dict(l=20, r=20, t=30, b=20),
-        xaxis=dict(visible=False, range=[0, 1]),
-        yaxis=dict(visible=False, range=[0, 1]),
-        paper_bgcolor="white",
-        plot_bgcolor="white",
-    )
-    st.plotly_chart(fig, use_container_width=True)
+    venn_table["Qtde atletas unicos"] = venn_table["Qtde atletas unicos"].map(format_int)
+    st.subheader("Tabela Venn (intersecoes exatas por e-mail)")
+    st.dataframe(venn_table[["Participacao", "Qtde atletas unicos"]], hide_index=True, use_container_width=True)
 
     k1, k2 = st.columns(2)
     k1.metric("Taxa de retorno 2026", format_pct(return_rate_2026))
