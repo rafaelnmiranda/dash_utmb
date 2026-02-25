@@ -1909,6 +1909,7 @@ def main() -> None:
     st.markdown("<div id='print-content'>", unsafe_allow_html=True)
     if tipo_relatorio == "Geral":
         render_header(scoped, data_base_label)
+        render_venn_unique_athletes(full_df)
         render_progress_projection(scoped, percurso_targets, start_date, end_date)
         render_demography(scoped)
         render_geography(scoped, ibge_df)
