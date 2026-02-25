@@ -4,6 +4,7 @@ import unicodedata
 import difflib
 from datetime import date
 from io import BytesIO
+from pathlib import Path
 
 import pandas as pd
 import plotly.express as px
@@ -80,6 +81,15 @@ COUPON_PREFIX_RULES = {
     "NUB": "NUBANK (CONVIDADOS NUBANK OU AJUSTES DE PRECO)",
     "CEX": "CONCESSAO EXCEPCIONAL (OUTROS)",
     "COL": "COLLO (VENDA MANUAL PARA ARGENTINOS EM DOLAR)",
+}
+
+HISTORICAL_VENN_FILES = {
+    "2023": ["UTMB - 2023 - USD.xlsx"],
+    "2024": ["UTMB - 2024 - USD.xlsx"],
+    "2025": [
+        "PARATY_BRAZIL_BY_UTMB__2025_ChatGPT_BRL 2025-10-03 02_51_05.xlsx",
+        "Paraty_Brazil_by_UTMB__2025_ChatGPT_USD 2025-10-03 01_50_37.xlsx",
+    ],
 }
 
 
@@ -556,6 +566,154 @@ def preprocess_uploaded_file(uploaded_file) -> pd.DataFrame:
 def get_filtered_base(df: pd.DataFrame) -> pd.DataFrame:
     base = df[df["is_registered"]].copy()
     return base
+
+
+def get_email_column_name(df: pd.DataFrame) -> str | None:
+    candidates = [
+        "Email",
+        "E-mail",
+        "email",
+        "e-mail",
+        "mail",
+        "athlete_email",
+        "participant_email",
+    ]
+    found = find_column_by_candidates(df.columns, candidates)
+    if found:
+        return found
+
+    for col in df.columns:
+        if "mail" in normalize_col_name(col):
+            return col
+    return None
+
+
+def extract_unique_emails(df: pd.DataFrame) -> set[str]:
+    email_col = get_email_column_name(df)
+    if not email_col:
+        return set()
+
+    series = df[email_col].dropna().astype(str).str.strip().str.lower()
+    series = series[~series.isin(["", "nan", "none", "null"])]
+    series = series[series.str.contains("@", regex=False)]
+    return set(series.tolist())
+
+
+@st.cache_data(show_spinner=False)
+def load_historical_venn_sets(base_dir: str) -> tuple[dict[str, set[str]], list[str]]:
+    base_path = Path(base_dir)
+    email_sets = {edition: set() for edition in HISTORICAL_VENN_FILES}
+    warnings: list[str] = []
+
+    for edition, files in HISTORICAL_VENN_FILES.items():
+        for filename in files:
+            file_path = base_path / filename
+            if not file_path.exists():
+                warnings.append(f"Arquivo historico ausente: {filename}")
+                continue
+            try:
+                hist_df = pd.read_excel(file_path, sheet_name=0)
+                hist_df = normalize_headers(hist_df)
+            except Exception as exc:  # noqa: BLE001
+                warnings.append(f"Falha ao ler {filename}: {exc}")
+                continue
+
+            email_col = get_email_column_name(hist_df)
+            if not email_col:
+                warnings.append(f"Coluna de e-mail nao encontrada em {filename}")
+                continue
+
+            email_sets[edition].update(extract_unique_emails(hist_df))
+    return email_sets, warnings
+
+
+def compute_membership_distribution(email_sets: dict[str, set[str]]) -> dict[int, int]:
+    universe = set().union(*email_sets.values()) if email_sets else set()
+    membership_counts = {1: 0, 2: 0, 3: 0, 4: 0}
+    for email in universe:
+        presence = sum(email in edition_set for edition_set in email_sets.values())
+        if presence in membership_counts:
+            membership_counts[presence] += 1
+    return membership_counts
+
+
+def render_venn_unique_athletes(df_2026_all_rows: pd.DataFrame) -> None:
+    st.header("Venn de Atletas Unicos (2023-2026)")
+
+    hist_sets, issues = load_historical_venn_sets(str(Path(__file__).resolve().parent))
+    for msg in issues:
+        st.warning(msg)
+
+    email_2026 = extract_unique_emails(df_2026_all_rows)
+    if not email_2026:
+        st.info("Sem e-mails validos no upload 2026 para montar o Venn.")
+        return
+
+    venn_sets = {
+        "2023": hist_sets.get("2023", set()),
+        "2024": hist_sets.get("2024", set()),
+        "2025": hist_sets.get("2025", set()),
+        "2026": email_2026,
+    }
+    totals = {edition: len(values) for edition, values in venn_sets.items()}
+    membership = compute_membership_distribution(venn_sets)
+
+    circle_layout = {
+        "2023": {"x": 0.34, "y": 0.60, "color": "rgba(59,130,246,0.25)", "stroke": "#3b82f6"},
+        "2024": {"x": 0.56, "y": 0.60, "color": "rgba(16,185,129,0.25)", "stroke": "#10b981"},
+        "2025": {"x": 0.44, "y": 0.42, "color": "rgba(245,158,11,0.25)", "stroke": "#f59e0b"},
+        "2026": {"x": 0.66, "y": 0.42, "color": "rgba(239,68,68,0.25)", "stroke": "#ef4444"},
+    }
+    radius = 0.22
+
+    fig = go.Figure()
+    for edition, layout in circle_layout.items():
+        fig.add_shape(
+            type="circle",
+            xref="paper",
+            yref="paper",
+            x0=layout["x"] - radius,
+            y0=layout["y"] - radius,
+            x1=layout["x"] + radius,
+            y1=layout["y"] + radius,
+            fillcolor=layout["color"],
+            line=dict(color=layout["stroke"], width=2),
+        )
+        fig.add_annotation(
+            x=layout["x"],
+            y=layout["y"] + radius + 0.08,
+            xref="paper",
+            yref="paper",
+            text=f"{edition}<br>Total: {format_int(totals[edition])}",
+            showarrow=False,
+            align="center",
+            font=dict(size=12),
+        )
+
+    fig.add_annotation(
+        x=0.50,
+        y=0.52,
+        xref="paper",
+        yref="paper",
+        text="Sobreposicao por e-mail",
+        showarrow=False,
+        font=dict(size=12, color="#334155"),
+    )
+    fig.update_layout(
+        height=520,
+        margin=dict(l=20, r=20, t=30, b=20),
+        xaxis=dict(visible=False, range=[0, 1]),
+        yaxis=dict(visible=False, range=[0, 1]),
+        paper_bgcolor="white",
+        plot_bgcolor="white",
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("So em 1 edicao", format_int(membership[1]))
+    c2.metric("Em 2 edicoes", format_int(membership[2]))
+    c3.metric("Em 3 edicoes", format_int(membership[3]))
+    c4.metric("Em 4 edicoes", format_int(membership[4]))
 
 
 def render_header(kpi_df: pd.DataFrame, data_base_label: str) -> None:
@@ -1586,9 +1744,19 @@ def render_financial_report(df: pd.DataFrame) -> None:
         st.plotly_chart(fig_daily, use_container_width=True)
 
     st.subheader("Estudo de cupons de desconto")
-    coupons = df[df["total_discounts_brl"] > 0].copy()
-    if coupons.empty:
+    discounted = df[df["total_discounts_brl"] > 0].copy()
+    if discounted.empty:
         st.info("Nenhuma inscricao com desconto no recorte atual.")
+        return
+
+    coupon_code_clean = discounted["coupon_code"].fillna("").astype(str).str.strip()
+    coupon_code_clean = coupon_code_clean.replace({"nan": "", "None": "", "none": ""})
+    coupons = discounted[coupon_code_clean != ""].copy()
+    if coupons.empty:
+        st.info(
+            "Ha descontos no recorte atual, mas sem codigo de cupom preenchido. "
+            "Por isso este estudo considera zero registros."
+        )
         return
 
     c1, c2, c3 = st.columns(3)
@@ -1651,8 +1819,8 @@ def render_financial_report(df: pd.DataFrame) -> None:
     st.plotly_chart(fig_prefix, use_container_width=True)
 
     st.caption(
-        "Classificacao atual usa `COUPON_PREFIX_RULES`. "
-        "Quando voce enviar a lista oficial, basta mapear cada prefixo no dicionario."
+        "Este estudo considera apenas inscricoes com desconto e `coupon_code` preenchido. "
+        "Classificacao atual usa `COUPON_PREFIX_RULES`."
     )
 
 
@@ -1749,6 +1917,7 @@ def main() -> None:
     st.markdown("<div id='print-content'>", unsafe_allow_html=True)
     if tipo_relatorio == "Geral":
         render_header(scoped, data_base_label)
+        render_venn_unique_athletes(full_df)
         render_progress_projection(scoped, percurso_targets, start_date, end_date)
         render_demography(scoped)
         render_geography(scoped, ibge_df)
