@@ -161,6 +161,23 @@ def format_pct(value: float) -> str:
     return f"{float(value):.2f}%".replace(".", ",")
 
 
+def style_bar_labels(fig: go.Figure) -> go.Figure:
+    # Prioriza rótulos dentro das barras com bom contraste e evita corte no layout.
+    fig.update_traces(
+        selector=dict(type="bar"),
+        textposition="auto",
+        insidetextanchor="middle",
+        insidetextfont=dict(color="white", size=12),
+        outsidetextfont=dict(color="#334155", size=12),
+        cliponaxis=False,
+        constraintext="both",
+    )
+    fig.update_layout(uniformtext_minsize=10, uniformtext_mode="hide")
+    fig.update_xaxes(automargin=True)
+    fig.update_yaxes(automargin=True)
+    return fig
+
+
 def to_bool(value) -> bool:
     if isinstance(value, bool):
         return value
@@ -541,7 +558,7 @@ def get_filtered_base(df: pd.DataFrame) -> pd.DataFrame:
     return base
 
 
-def render_header(kpi_df: pd.DataFrame, data_base: date) -> None:
+def render_header(kpi_df: pd.DataFrame, data_base_label: str) -> None:
     total = len(kpi_df)
     female = kpi_df["gender"].astype(str).str.upper().isin(["F", "FEMALE"]).sum() if "gender" in kpi_df.columns else 0
     pct_female = (female / total * 100) if total else 0
@@ -564,7 +581,7 @@ def render_header(kpi_df: pd.DataFrame, data_base: date) -> None:
         f"""
         <div class="hero">
           <h2>Dashboard de Inscricoes 2026 - Paraty Brazil by UTMB</h2>
-          <p class="subtle">Base atualizada ate {data_base:%d/%m/%Y} | Conversao fixa: 1 USD = R$ 5,00</p>
+          <p class="subtle">Base atualizada ate {data_base_label} | Conversao fixa: 1 USD = R$ 5,00</p>
         </div>
         """,
         unsafe_allow_html=True,
@@ -592,7 +609,7 @@ def render_header(kpi_df: pd.DataFrame, data_base: date) -> None:
     y2.caption(f"BR: {format_int(bus_br)} | Estrangeiros: {format_int(bus_foreign)}")
 
 
-def render_header_marketing(kpi_df: pd.DataFrame, data_base: date) -> None:
+def render_header_marketing(kpi_df: pd.DataFrame, data_base_label: str) -> None:
     total = len(kpi_df)
     female = kpi_df["gender"].astype(str).str.upper().isin(["F", "FEMALE"]).sum() if "gender" in kpi_df.columns else 0
     pct_female = (female / total * 100) if total else 0
@@ -610,7 +627,7 @@ def render_header_marketing(kpi_df: pd.DataFrame, data_base: date) -> None:
         f"""
         <div class="hero">
           <h2>Dashboard Marketing 2026 - Paraty Brazil by UTMB</h2>
-          <p class="subtle">Base atualizada ate {data_base:%d/%m/%Y} | Visao de audiencia, perfil e ritmo</p>
+          <p class="subtle">Base atualizada ate {data_base_label} | Visao de audiencia, perfil e ritmo</p>
         </div>
         """,
         unsafe_allow_html=True,
@@ -633,7 +650,7 @@ def render_header_marketing(kpi_df: pd.DataFrame, data_base: date) -> None:
     )
 
 
-def render_header_financial(kpi_df: pd.DataFrame, data_base: date) -> None:
+def render_header_financial(kpi_df: pd.DataFrame, data_base_label: str) -> None:
     total = len(kpi_df)
     gross = float(kpi_df["total_registration_brl"].sum())
     discounts = float(kpi_df["total_discounts_brl"].sum())
@@ -647,7 +664,7 @@ def render_header_financial(kpi_df: pd.DataFrame, data_base: date) -> None:
         f"""
         <div class="hero">
           <h2>Dashboard Financeiro 2026 - Paraty Brazil by UTMB</h2>
-          <p class="subtle">Base atualizada ate {data_base:%d/%m/%Y} | Foco em faturamento, descontos e ticket medio</p>
+          <p class="subtle">Base atualizada ate {data_base_label} | Foco em faturamento, descontos e ticket medio</p>
         </div>
         """,
         unsafe_allow_html=True,
@@ -801,6 +818,8 @@ def render_progress_projection(df: pd.DataFrame, targets: dict[str, int], start_
             showlegend=True,
         )
     )
+    fig_comp = style_bar_labels(fig_comp)
+    fig_comp.update_traces(textposition="none", selector=dict(name="Restante ate meta"))
     fig_comp.update_layout(
         height=380,
         barmode="stack",
@@ -910,7 +929,7 @@ def render_demography(df: pd.DataFrame, expandido: bool = False) -> None:
         col_c, col_d = st.columns(2)
         col_c.dataframe(age_counts, hide_index=True, use_container_width=True)
         fig_age = px.bar(age_counts, x="Faixa", y="Inscritos", text="Inscritos")
-        fig_age.update_traces(textposition="outside")
+        fig_age = style_bar_labels(fig_age)
         fig_age.update_layout(height=320)
         col_d.plotly_chart(fig_age, use_container_width=True)
 
@@ -977,7 +996,9 @@ def render_historical(df: pd.DataFrame) -> None:
     st.plotly_chart(px.line(yearly, x="Ano", y="Inscritos", markers=True), use_container_width=True)
     if "Email" in df.columns:
         unique_by_year = df.dropna(subset=["Email"]).groupby("Ano")["Email"].nunique().rename("Atletas unicos").reset_index()
-        st.plotly_chart(px.bar(unique_by_year, x="Ano", y="Atletas unicos"), use_container_width=True)
+        fig_unique = px.bar(unique_by_year, x="Ano", y="Atletas unicos", text="Atletas unicos")
+        fig_unique = style_bar_labels(fig_unique)
+        st.plotly_chart(fig_unique, use_container_width=True)
 
 
 def render_sales_patterns(df: pd.DataFrame) -> None:
@@ -999,11 +1020,11 @@ def render_sales_patterns(df: pd.DataFrame) -> None:
     weekday_counts = weekday_counts.sort_values("weekday")
 
     fig_week = px.bar(week_counts, x="week", y="Inscricoes", title="Ultimas 12 semanas", text="Inscricoes")
-    fig_week.update_traces(textposition="outside")
+    fig_week = style_bar_labels(fig_week)
     st.plotly_chart(fig_week, use_container_width=True)
     col1, col2 = st.columns(2)
     fig_days = px.bar(day_counts.tail(30), x="day", y="Inscricoes", title="Ultimos 30 dias", text="Inscricoes")
-    fig_days.update_traces(textposition="outside")
+    fig_days = style_bar_labels(fig_days)
     col1.plotly_chart(fig_days, use_container_width=True)
     fig_weekday = px.bar(
         weekday_counts,
@@ -1012,7 +1033,7 @@ def render_sales_patterns(df: pd.DataFrame) -> None:
         title="Media por dia da semana",
         text="Inscricoes",
     )
-    fig_weekday.update_traces(textposition="outside")
+    fig_weekday = style_bar_labels(fig_weekday)
     col2.plotly_chart(fig_weekday, use_container_width=True)
 
     day_counts["acumulado"] = day_counts["Inscricoes"].cumsum()
@@ -1041,7 +1062,7 @@ def render_horarios_venda(df: pd.DataFrame) -> None:
     c2.metric("Inscricoes no pico", format_int(peak_count))
 
     fig_hour = px.bar(hour_counts, x="Hora", y="Inscricoes", text="Inscricoes", title="Inscricoes por hora do dia")
-    fig_hour.update_traces(textposition="outside")
+    fig_hour = style_bar_labels(fig_hour)
     fig_hour.update_layout(height=340, xaxis=dict(dtick=1))
     st.plotly_chart(fig_hour, use_container_width=True)
 
@@ -1065,7 +1086,7 @@ def render_horarios_venda(df: pd.DataFrame) -> None:
     p1, p2 = st.columns(2)
     p1.dataframe(period_counts, hide_index=True, use_container_width=True)
     fig_period = px.bar(period_counts, x="Periodo", y="Inscritos", text="Inscritos", title="Inscricoes por periodo do dia")
-    fig_period.update_traces(textposition="outside")
+    fig_period = style_bar_labels(fig_period)
     fig_period.update_layout(height=320)
     p2.plotly_chart(fig_period, use_container_width=True)
 
@@ -1137,7 +1158,7 @@ def render_team_medical_company(df: pd.DataFrame) -> None:
     t1, t2 = st.columns(2)
     t1.dataframe(team_grouped[["Assessoria", "Atletas", "% dos inscritos"]], hide_index=True, use_container_width=True)
     fig_team = px.bar(team_grouped, x="Assessoria", y="Atletas", text="Atletas", title="Top 10 assessorias inscritas")
-    fig_team.update_traces(textposition="outside")
+    fig_team = style_bar_labels(fig_team)
     fig_team.update_layout(height=360, xaxis_tickangle=-25)
     t2.plotly_chart(fig_team, use_container_width=True)
 
@@ -1192,7 +1213,7 @@ def render_perfil_inscrito(df: pd.DataFrame) -> None:
         p1, p2 = st.columns(2)
         p1.dataframe(percurso_counts, hide_index=True, use_container_width=True)
         fig_percurso = px.bar(percurso_counts, x="Percurso", y="Interessados", text="Interessados")
-        fig_percurso.update_traces(textposition="outside")
+        fig_percurso = style_bar_labels(fig_percurso)
         fig_percurso.update_layout(height=340)
         p2.plotly_chart(fig_percurso, use_container_width=True)
 
@@ -1271,7 +1292,7 @@ def render_yopp_section(df: pd.DataFrame, ibge_df: pd.DataFrame) -> None:
     y1, y2 = st.columns(2)
     y1.dataframe(yopp_by_course, hide_index=True, use_container_width=True)
     fig_yopp = px.bar(yopp_by_course, x="Percurso", y="Oculos vendidos", text="Oculos vendidos")
-    fig_yopp.update_traces(textposition="outside")
+    fig_yopp = style_bar_labels(fig_yopp)
     fig_yopp.update_layout(height=340)
     y2.plotly_chart(fig_yopp, use_container_width=True)
 
@@ -1391,7 +1412,7 @@ def render_nubank_section(df: pd.DataFrame, ibge_df: pd.DataFrame) -> None:
     r1, r2 = st.columns(2)
     r1.dataframe(by_route, hide_index=True, use_container_width=True)
     fig_route = px.bar(by_route, x="Percurso", y="Inscritos", text="Inscritos")
-    fig_route.update_traces(textposition="outside")
+    fig_route = style_bar_labels(fig_route)
     fig_route.update_layout(height=320)
     r2.plotly_chart(fig_route, use_container_width=True)
 
@@ -1521,7 +1542,8 @@ def render_financial_report(df: pd.DataFrame) -> None:
         text="receita_liquida",
         title="Receita liquida por percurso",
     )
-    fig_net_route.update_traces(texttemplate="%{text:,.0f}", textposition="outside")
+    fig_net_route = style_bar_labels(fig_net_route)
+    fig_net_route.update_traces(texttemplate="%{text:,.0f}")
     fig_net_route.update_layout(height=340)
     g1.plotly_chart(fig_net_route, use_container_width=True)
 
@@ -1532,7 +1554,8 @@ def render_financial_report(df: pd.DataFrame) -> None:
         text="taxa_desconto",
         title="Taxa de desconto por percurso",
     )
-    fig_discount_route.update_traces(texttemplate="%{text:.1f}%", textposition="outside")
+    fig_discount_route = style_bar_labels(fig_discount_route)
+    fig_discount_route.update_traces(texttemplate="%{text:.1f}%")
     fig_discount_route.update_layout(height=340, yaxis_title="%")
     g2.plotly_chart(fig_discount_route, use_container_width=True)
 
@@ -1622,7 +1645,8 @@ def render_financial_report(df: pd.DataFrame) -> None:
         text="desconto_total",
         title="Top prefixos por desconto total",
     )
-    fig_prefix.update_traces(texttemplate="%{text:,.0f}", textposition="outside")
+    fig_prefix = style_bar_labels(fig_prefix)
+    fig_prefix.update_traces(texttemplate="%{text:,.0f}")
     fig_prefix.update_layout(height=330, xaxis_title="Prefixo (3 letras)", yaxis_title="Desconto total (R$)")
     st.plotly_chart(fig_prefix, use_container_width=True)
 
@@ -1705,9 +1729,16 @@ def main() -> None:
         st.warning("Nao ha registros com `Registered status = True` no recorte atual.")
         return
 
-    # Data base do relatório: maior data de inscrição entre BR e US (já é o max do concat)
-    data_base = filtered["Registration date"].max()
-    data_base = data_base.date() if pd.notna(data_base) else date.today()
+    # Data base do relatório: última inscrição válida com horário (prioriza date_time).
+    data_base_ts = pd.NaT
+    if "date_time_parsed" in filtered.columns:
+        data_base_ts = filtered["date_time_parsed"].max()
+    if pd.isna(data_base_ts):
+        data_base_ts = filtered["Registration date"].max()
+    if pd.notna(data_base_ts):
+        data_base_label = data_base_ts.strftime("%d/%m/%Y às %H:%M")
+    else:
+        data_base_label = f"{date.today():%d/%m/%Y} às 00:00"
 
     scoped = filtered.copy()
     if scoped.empty:
@@ -1717,7 +1748,7 @@ def main() -> None:
     ibge_df = load_ibge()
     st.markdown("<div id='print-content'>", unsafe_allow_html=True)
     if tipo_relatorio == "Geral":
-        render_header(scoped, data_base)
+        render_header(scoped, data_base_label)
         render_progress_projection(scoped, percurso_targets, start_date, end_date)
         render_demography(scoped)
         render_geography(scoped, ibge_df)
@@ -1727,7 +1758,7 @@ def main() -> None:
         render_nubank_section(scoped, ibge_df)
         render_exports(full_df, scoped)
     elif tipo_relatorio == "Marketing":
-        render_header_marketing(scoped, data_base)
+        render_header_marketing(scoped, data_base_label)
         render_progress_projection(scoped, percurso_targets, start_date, end_date)
         render_demography(scoped, expandido=True)
         render_geography(scoped, ibge_df)
@@ -1739,7 +1770,7 @@ def main() -> None:
         render_nubank_section(scoped, ibge_df)
         render_perfil_inscrito(scoped)
     else:
-        render_header_financial(scoped, data_base)
+        render_header_financial(scoped, data_base_label)
         render_financial_report(scoped)
         render_exports(full_df, scoped)
 
