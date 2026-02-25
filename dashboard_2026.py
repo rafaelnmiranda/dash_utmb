@@ -726,6 +726,7 @@ def render_venn_unique_athletes(df_2026_all_rows: pd.DataFrame) -> None:
 
 def render_header(kpi_df: pd.DataFrame, data_base_label: str) -> None:
     total = len(kpi_df)
+    unique_emails = len(extract_unique_emails(kpi_df))
     female = kpi_df["gender"].astype(str).str.upper().isin(["F", "FEMALE"]).sum() if "gender" in kpi_df.columns else 0
     pct_female = (female / total * 100) if total else 0
     foreigners = kpi_df[kpi_df["nationality_std"] != "BR"].shape[0] if "nationality_std" in kpi_df.columns else 0
@@ -753,7 +754,7 @@ def render_header(kpi_df: pd.DataFrame, data_base_label: str) -> None:
         unsafe_allow_html=True,
     )
 
-    c1, c2, c3, c4, c5, c6, c7 = st.columns(7)
+    c1, c2, c3, c4, c5, c6, c7, c8 = st.columns(8)
     c1.metric("Inscritos ativos", format_int(total))
     c2.metric("% mulheres", format_pct(pct_female))
     c3.metric("% estrangeiros", format_pct(pct_foreigners))
@@ -761,6 +762,7 @@ def render_header(kpi_df: pd.DataFrame, data_base_label: str) -> None:
     c5.metric("Receita liquida", format_currency(net_revenue))
     c6.metric("Ticket medio", format_currency(avg_ticket))
     c7.metric("Pagaram com cartao Nubank", format_int(nubank_total))
+    c8.metric("E-mails unicos", format_int(unique_emails))
 
     YOPP_META_OCULOS = 300
     pct_venda_yopp = (yopp_total / YOPP_META_OCULOS * 100) if YOPP_META_OCULOS else 0
@@ -1925,7 +1927,6 @@ def main() -> None:
     st.markdown("<div id='print-content'>", unsafe_allow_html=True)
     if tipo_relatorio == "Geral":
         render_header(scoped, data_base_label)
-        render_venn_unique_athletes(full_df)
         render_progress_projection(scoped, percurso_targets, start_date, end_date)
         render_demography(scoped)
         render_geography(scoped, ibge_df)
