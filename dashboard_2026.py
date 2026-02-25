@@ -197,6 +197,12 @@ def to_bool(value) -> bool:
     return txt in {"true", "1", "yes", "y", "sim"}
 
 
+def is_registered_status_series(series: pd.Series) -> pd.Series:
+    txt = series.fillna("").astype(str).str.strip().str.lower()
+    registered_values = {"true", "1", "yes", "y", "sim", "completed", "paid", "confirmed", "approved"}
+    return txt.isin(registered_values)
+
+
 def normalize_headers(df: pd.DataFrame) -> pd.DataFrame:
     renamed = {}
     for col in df.columns:
@@ -510,8 +516,15 @@ def preprocess_uploaded_file(uploaded_file) -> pd.DataFrame:
         st.warning(f"Edition ID sem mapeamento de moeda: {', '.join(unknown_ids)}")
 
     registered_status_col = pick_existing_column(df.columns, ["Registered status", "Status"])
-    # KPI oficial: considerar inscricoes com status registrado/ativo na base.
-    df["is_registered"] = df.get(registered_status_col).apply(to_bool) if registered_status_col else False
+    # KPI oficial: considerar inscricoes ativas. Em algumas bases antigas, o status vem como COMPLETED.
+    if registered_status_col:
+        status_series = df.get(registered_status_col)
+        if normalize_col_name(registered_status_col) == "status":
+            df["is_registered"] = is_registered_status_series(status_series)
+        else:
+            df["is_registered"] = status_series.apply(to_bool)
+    else:
+        df["is_registered"] = False
     df["Competition"] = df.get("Competition").apply(standardize_competition)
     df = df[~df["Competition"].astype(str).str.contains("KIDS", case=False, na=False)].copy()
 
@@ -1772,15 +1785,15 @@ def render_financial_report(df: pd.DataFrame) -> None:
     coupon_code_clean = df["coupon_code"].fillna("").astype(str).str.strip()
     coupon_code_clean = coupon_code_clean.replace({"nan": "", "None": "", "none": ""})
     coupon_code_len = coupon_code_clean.str.len()
-    coupons = df[coupon_code_len > 2].copy()
+    coupons = df[(coupon_code_len > 2) & (df["total_discounts_brl"] > 0)].copy()
     if coupons.empty:
         st.info(
-            "Nenhum valor valido na coluna de cupom (minimo de 3 caracteres) no recorte atual."
+            "Nenhuma inscricao com cupom valido (3+ caracteres) e desconto > 0 no recorte atual."
         )
         return
 
     c1, c2, c3 = st.columns(3)
-    c1.metric("Inscricoes com cupom (>=3)", format_int(len(coupons)))
+    c1.metric("Inscricoes com cupom (>=3) e desconto", format_int(len(coupons)))
     c2.metric("Total de desconto (R$)", format_currency(coupons["total_discounts_brl"].sum()))
     c3.metric("Prefixos unicos (3 letras)", format_int(coupons["coupon_prefix"].nunique()))
 
@@ -1839,7 +1852,7 @@ def render_financial_report(df: pd.DataFrame) -> None:
     st.plotly_chart(fig_prefix, use_container_width=True)
 
     st.caption(
-        "Este estudo considera cupons com 3+ caracteres na coluna de codigo de desconto. "
+        "Este estudo considera cupom com 3+ caracteres e desconto > 0. "
         "Classificacao atual usa `COUPON_PREFIX_RULES`."
     )
 
