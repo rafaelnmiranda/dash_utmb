@@ -369,11 +369,26 @@ def detect_nubank_column(columns):
 
 
 def detect_coupon_column(columns):
+    preferred = {"discount_codes", "discount_code", "coupon_code", "coupon_codes"}
+    for col in columns:
+        if normalize_col_name(col) in preferred:
+            return col
     for col in columns:
         col_norm = normalize_col_name(col)
         has_coupon = any(token in col_norm for token in ["coupon", "cupom", "voucher", "promo", "discount_code"])
         if has_coupon:
             return col
+    return None
+
+
+def pick_existing_column(columns, candidates):
+    normalized_lookup = {normalize_col_name(col): col for col in columns}
+    for candidate in candidates:
+        if candidate in columns:
+            return candidate
+        normalized_candidate = normalize_col_name(candidate)
+        if normalized_candidate in normalized_lookup:
+            return normalized_lookup[normalized_candidate]
     return None
 
 
@@ -494,8 +509,9 @@ def preprocess_uploaded_file(uploaded_file) -> pd.DataFrame:
         unknown_ids = sorted(df.loc[df["edition_currency"] == "UNKNOWN", "Edition ID"].dropna().astype(str).unique())
         st.warning(f"Edition ID sem mapeamento de moeda: {', '.join(unknown_ids)}")
 
-    # KPI oficial: considerar inscricoes com Registered status = True
-    df["is_registered"] = df.get("Registered status").apply(to_bool)
+    registered_status_col = pick_existing_column(df.columns, ["Registered status", "Status"])
+    # KPI oficial: considerar inscricoes com status registrado/ativo na base.
+    df["is_registered"] = df.get(registered_status_col).apply(to_bool) if registered_status_col else False
     df["Competition"] = df.get("Competition").apply(standardize_competition)
     df = df[~df["Competition"].astype(str).str.contains("KIDS", case=False, na=False)].copy()
 
@@ -548,13 +564,28 @@ def preprocess_uploaded_file(uploaded_file) -> pd.DataFrame:
     df["coupon_prefix"] = df["coupon_prefix"].replace("", "SEM")
     df["coupon_family"] = df["coupon_code"].apply(classify_coupon_prefix)
 
-    for numeric_col in ["Registration amount", "Total registration amount", "Total discounts amount"]:
-        df[numeric_col] = pd.to_numeric(df.get(numeric_col), errors="coerce").fillna(0)
+    registration_col = pick_existing_column(df.columns, ["Registration amount"])
+    total_registration_col = pick_existing_column(df.columns, ["Total registration amount", "Registration amount"])
+    total_discounts_col = pick_existing_column(df.columns, ["Total discounts amount", "Discounts amount"])
+
+    registration_series = (
+        pd.to_numeric(df.get(registration_col), errors="coerce").fillna(0) if registration_col else pd.Series(0, index=df.index)
+    )
+    total_registration_series = (
+        pd.to_numeric(df.get(total_registration_col), errors="coerce").fillna(0)
+        if total_registration_col
+        else pd.Series(0, index=df.index)
+    )
+    total_discounts_series = (
+        pd.to_numeric(df.get(total_discounts_col), errors="coerce").fillna(0)
+        if total_discounts_col
+        else pd.Series(0, index=df.index)
+    )
 
     usd_factor = df["edition_currency"].eq("USD").astype(int) * (EXCHANGE_RATE_USD_TO_BRL - 1) + 1
-    df["registration_brl"] = df["Registration amount"] * usd_factor
-    df["total_registration_brl"] = df["Total registration amount"] * usd_factor
-    df["total_discounts_brl"] = df["Total discounts amount"] * usd_factor
+    df["registration_brl"] = registration_series * usd_factor
+    df["total_registration_brl"] = total_registration_series * usd_factor
+    df["total_discounts_brl"] = total_discounts_series * usd_factor
     df["net_revenue_brl"] = df["total_registration_brl"] - df["total_discounts_brl"]
 
     today = pd.Timestamp.now().normalize()
@@ -1738,23 +1769,18 @@ def render_financial_report(df: pd.DataFrame) -> None:
         st.plotly_chart(fig_daily, use_container_width=True)
 
     st.subheader("Estudo de cupons de desconto")
-    discounted = df[df["total_discounts_brl"] > 0].copy()
-    if discounted.empty:
-        st.info("Nenhuma inscricao com desconto no recorte atual.")
-        return
-
-    coupon_code_clean = discounted["coupon_code"].fillna("").astype(str).str.strip()
+    coupon_code_clean = df["coupon_code"].fillna("").astype(str).str.strip()
     coupon_code_clean = coupon_code_clean.replace({"nan": "", "None": "", "none": ""})
-    coupons = discounted[coupon_code_clean != ""].copy()
+    coupon_code_len = coupon_code_clean.str.len()
+    coupons = df[coupon_code_len > 2].copy()
     if coupons.empty:
         st.info(
-            "Ha descontos no recorte atual, mas sem codigo de cupom preenchido. "
-            "Por isso este estudo considera zero registros."
+            "Nenhum valor valido na coluna de cupom (minimo de 3 caracteres) no recorte atual."
         )
         return
 
     c1, c2, c3 = st.columns(3)
-    c1.metric("Inscricoes com desconto", format_int(len(coupons)))
+    c1.metric("Inscricoes com cupom (>=3)", format_int(len(coupons)))
     c2.metric("Total de desconto (R$)", format_currency(coupons["total_discounts_brl"].sum()))
     c3.metric("Prefixos unicos (3 letras)", format_int(coupons["coupon_prefix"].nunique()))
 
@@ -1813,7 +1839,7 @@ def render_financial_report(df: pd.DataFrame) -> None:
     st.plotly_chart(fig_prefix, use_container_width=True)
 
     st.caption(
-        "Este estudo considera apenas inscricoes com desconto e `coupon_code` preenchido. "
+        "Este estudo considera cupons com 3+ caracteres na coluna de codigo de desconto. "
         "Classificacao atual usa `COUPON_PREFIX_RULES`."
     )
 
