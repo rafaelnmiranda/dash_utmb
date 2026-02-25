@@ -87,8 +87,8 @@ HISTORICAL_VENN_FILES = {
     "2023": ["UTMB - 2023 - USD.xlsx"],
     "2024": ["UTMB - 2024 - USD.xlsx"],
     "2025": [
-        "PARATY_BRAZIL_BY_UTMB__2025_ChatGPT_BRL 2025-10-03 02_51_05.xlsx",
-        "Paraty_Brazil_by_UTMB__2025_ChatGPT_USD 2025-10-03 01_50_37.xlsx",
+        "UTMB - 2025 - BRL.xlsx",
+        "UTMB - 2025 - USD.xlsx",
     ],
 }
 
