@@ -599,7 +599,6 @@ def extract_unique_emails(df: pd.DataFrame) -> set[str]:
     return set(series.tolist())
 
 
-@st.cache_data(show_spinner=False)
 def load_historical_venn_sets(base_dir: str) -> tuple[dict[str, set[str]], list[str]]:
     base_path = Path(base_dir)
     email_sets = {edition: set() for edition in HISTORICAL_VENN_FILES}
@@ -662,14 +661,17 @@ def render_venn_unique_athletes(df_2026_all_rows: pd.DataFrame) -> None:
     return_rate_2026 = (returning_2026 / totals["2026"] * 100) if totals["2026"] else 0
     new_2026 = totals["2026"] - returning_2026
 
-    t1, t2, t3, t4 = st.columns(4)
+    editions = ["2023", "2024", "2025", "2026"]
+    universe = set().union(*venn_sets.values())
+    total_unique_general = len(universe)
+
+    t1, t2, t3, t4, t5 = st.columns(5)
     t1.metric("Total unicos 2023", format_int(totals["2023"]))
     t2.metric("Total unicos 2024", format_int(totals["2024"]))
     t3.metric("Total unicos 2025", format_int(totals["2025"]))
     t4.metric("Total unicos 2026", format_int(totals["2026"]))
+    t5.metric("Total unicos geral", format_int(total_unique_general))
 
-    editions = ["2023", "2024", "2025", "2026"]
-    universe = set().union(*venn_sets.values())
     combo_counts: dict[tuple[bool, bool, bool, bool], int] = {}
     for email in universe:
         key = tuple(email in venn_sets[edition] for edition in editions)
