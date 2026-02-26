@@ -24,6 +24,10 @@ st.set_page_config(
 
 
 EXCHANGE_RATE_USD_TO_BRL = 5.0
+YOPP_PRICE_BRL = 159.0
+YOPP_PRICE_USD = 32.0
+PTR17_BUS_PRICE_BRL = 30.0
+PTR17_BUS_PRICE_USD = 6.0
 EDITION_TO_CURRENCY = {
     "691336e655be7bd5663d55ef": "USD",
     "6985ddfb09a601887cdbec29": "BRL",
@@ -31,14 +35,14 @@ EDITION_TO_CURRENCY = {
 
 DEFAULT_MODULES = [
     "KPIs gerais e metas",
-    "Projecoes e ritmo de vendas",
+    "Projeções e ritmo de vendas",
     "Demografia",
     "Geografia Brasil",
     "Internacional",
-    "Comparativo historico",
-    "Padroes de venda",
+    "Comparativo histórico",
+    "Padrões de venda",
     "Financeiro",
-    "Exportacoes",
+    "Exportações",
 ]
 REQUIRED_COLUMNS = [
     "Edition ID",
@@ -61,12 +65,12 @@ DEFAULT_PERCURSO_TARGETS = {
 }
 
 # Regras para classificar cupons pelo prefixo (3 primeiras letras).
-# Atualize este dicionario quando enviar a lista oficial de logica.
+# Atualize este dicionário quando enviar a lista oficial de lógica.
 COUPON_PREFIX_RULES = {
     "IFL": "INFLUENCIADORES",
     "IDS": "IDOSO",
-    "PCD": "PESSOA COM DEFICIENCIA",
-    "MDS": "MORADORES DE PARATY E REGIAO",
+    "PCD": "PESSOA COM DEFICIÊNCIA",
+    "MDS": "MORADORES DE PARATY E REGIÃO",
     "PRA": "PREFEITURA (CORTESIAS)",
     "CTA": "CORTESIA",
     "ETE": "ATLETA DE ELITE",
@@ -74,13 +78,13 @@ COUPON_PREFIX_RULES = {
     "VIP": "VIP",
     "EXP": "EXPOSITORES",
     "PAT": "PATROCINADORES",
-    "UPG": "UPGRADE (MUDANCA DE PERCURSO)",
-    "DWG": "DOWNGRADE (MUDANCA DE PERCURSO)",
+    "UPG": "UPGRADE (MUDANÇA DE PERCURSO)",
+    "DWG": "DOWNGRADE (MUDANÇA DE PERCURSO)",
     "CPD": "CONTRAPARTIDA (PATROCINADORES E PARCEIROS)",
     "IDX": "INDEX (DESCONTO PELO UTMB INDEX DO ATLETA)",
-    "NUB": "NUBANK (CONVIDADOS NUBANK OU AJUSTES DE PRECO)",
-    "CEX": "CONCESSAO EXCEPCIONAL (OUTROS)",
-    "COL": "COLLO (VENDA MANUAL PARA ARGENTINOS EM DOLAR)",
+    "NUB": "NUBANK (CONVIDADOS NUBANK OU AJUSTES DE PREÇO)",
+    "CEX": "CONCESSÃO EXCEPCIONAL (OUTROS)",
+    "COL": "COLLO (VENDA MANUAL PARA ARGENTINOS EM DÓLAR)",
 }
 
 HISTORICAL_VENN_FILES = {
@@ -217,6 +221,66 @@ def parse_currency_from_edition(edition_id) -> str:
     if pd.isna(edition_id):
         return "UNKNOWN"
     return EDITION_TO_CURRENCY.get(str(edition_id).strip(), "UNKNOWN")
+
+
+def revenue_split_by_currency(df: pd.DataFrame, value_col: str) -> tuple[float, float, float]:
+    if value_col not in df.columns:
+        return 0.0, 0.0, 0.0
+    total = float(df[value_col].sum())
+    if "edition_currency" not in df.columns:
+        return total, 0.0, total
+    usd_mask = df["edition_currency"].eq("USD")
+    usd_value = float(df.loc[usd_mask, value_col].sum())
+    brl_value = total - usd_value
+    return brl_value, usd_value, total
+
+
+def compute_additional_revenue(df: pd.DataFrame) -> dict[str, float]:
+    if df.empty:
+        return {
+            "yopp_brl": 0.0,
+            "yopp_usd_brl": 0.0,
+            "yopp_total": 0.0,
+            "bus_ptr17_brl": 0.0,
+            "bus_ptr17_usd_brl": 0.0,
+            "bus_ptr17_total": 0.0,
+            "extras_total": 0.0,
+        }
+
+    usd_mask = (
+        df["edition_currency"].eq("USD")
+        if "edition_currency" in df.columns
+        else pd.Series(False, index=df.index)
+    )
+    brl_mask = ~usd_mask
+
+    yopp_mask = (
+        df["yopp_flag"].fillna(0).gt(0)
+        if "yopp_flag" in df.columns
+        else pd.Series(False, index=df.index)
+    )
+    yopp_brl = float((yopp_mask & brl_mask).sum()) * YOPP_PRICE_BRL
+    yopp_usd_brl = float((yopp_mask & usd_mask).sum()) * YOPP_PRICE_USD * EXCHANGE_RATE_USD_TO_BRL
+    yopp_total = yopp_brl + yopp_usd_brl
+
+    ptr17_mask = (
+        df["Competition"].fillna("").astype(str).eq("PTR 17")
+        if "Competition" in df.columns
+        else pd.Series(False, index=df.index)
+    )
+    bus_ptr17_brl = float((ptr17_mask & brl_mask).sum()) * PTR17_BUS_PRICE_BRL
+    bus_ptr17_usd_brl = float((ptr17_mask & usd_mask).sum()) * PTR17_BUS_PRICE_USD * EXCHANGE_RATE_USD_TO_BRL
+    bus_ptr17_total = bus_ptr17_brl + bus_ptr17_usd_brl
+
+    return {
+        "yopp_brl": yopp_brl,
+        "yopp_usd_brl": yopp_usd_brl,
+        "yopp_total": yopp_total,
+        "bus_ptr17_brl": bus_ptr17_brl,
+        "bus_ptr17_usd_brl": bus_ptr17_usd_brl,
+        "bus_ptr17_total": bus_ptr17_total,
+        "extras_total": yopp_total + bus_ptr17_total,
+    }
 
 
 def standardize_competition(value):
@@ -475,8 +539,8 @@ def validate_columns(df: pd.DataFrame, source_name: str) -> list[str]:
     missing = [col for col in REQUIRED_COLUMNS if col not in df.columns]
     if missing:
         st.warning(
-            f"Arquivo `{source_name}` sem colunas obrigatorias: {', '.join(missing)}. "
-            "Essas metricas podem ficar incompletas."
+            f"Arquivo `{source_name}` sem colunas obrigatórias: {', '.join(missing)}. "
+            "Essas métricas podem ficar incompletas."
         )
     return missing
 
@@ -506,9 +570,9 @@ def preprocess_uploaded_file(uploaded_file) -> pd.DataFrame:
     df["sale_period"] = pd.cut(
         df["sale_hour"],
         bins=[-0.1, 5.9, 11.9, 17.9, 23.9],
-        labels=["Madrugada", "Manha", "Tarde", "Noite"],
+        labels=["Madrugada", "Manhã", "Tarde", "Noite"],
     ).astype("object")
-    df["sale_period"] = df["sale_period"].fillna("Sem horario")
+    df["sale_period"] = df["sale_period"].fillna("Sem horário")
 
     df["edition_currency"] = df.get("Edition ID").apply(parse_currency_from_edition)
     if (df["edition_currency"] == "UNKNOWN").any():
@@ -516,7 +580,7 @@ def preprocess_uploaded_file(uploaded_file) -> pd.DataFrame:
         st.warning(f"Edition ID sem mapeamento de moeda: {', '.join(unknown_ids)}")
 
     registered_status_col = pick_existing_column(df.columns, ["Registered status", "Status"])
-    # KPI oficial: considerar inscricoes ativas. Em algumas bases antigas, o status vem como COMPLETED.
+    # KPI oficial: considerar inscrições ativas. Em algumas bases antigas, o status vem como COMPLETED.
     if registered_status_col:
         status_series = df.get(registered_status_col)
         if normalize_col_name(registered_status_col) == "status":
@@ -652,7 +716,7 @@ def load_historical_venn_sets(base_dir: str) -> tuple[dict[str, set[str]], list[
         for filename in files:
             file_path = base_path / filename
             if not file_path.exists():
-                warnings.append(f"Arquivo historico ausente: {filename}")
+                warnings.append(f"Arquivo histórico ausente: {filename}")
                 continue
             try:
                 hist_df = pd.read_excel(file_path, sheet_name=0)
@@ -663,7 +727,7 @@ def load_historical_venn_sets(base_dir: str) -> tuple[dict[str, set[str]], list[
 
             email_col = get_email_column_name(hist_df)
             if not email_col:
-                warnings.append(f"Coluna de e-mail nao encontrada em {filename}")
+                warnings.append(f"Coluna de e-mail não encontrada em {filename}")
                 continue
 
             email_sets[edition].update(extract_unique_emails(hist_df))
@@ -681,7 +745,7 @@ def compute_membership_distribution(email_sets: dict[str, set[str]]) -> dict[int
 
 
 def render_venn_unique_athletes(df_2026_all_rows: pd.DataFrame) -> None:
-    st.header("Venn de Atletas Unicos (2023-2026)")
+    st.header("Venn de Atletas Únicos (2023-2026)")
 
     hist_sets, issues = load_historical_venn_sets(str(Path(__file__).resolve().parent))
     for msg in issues:
@@ -689,7 +753,7 @@ def render_venn_unique_athletes(df_2026_all_rows: pd.DataFrame) -> None:
 
     email_2026 = extract_unique_emails(df_2026_all_rows)
     if not email_2026:
-        st.info("Sem e-mails validos no upload 2026 para montar o Venn.")
+        st.info("Sem e-mails válidos no upload 2026 para montar o Venn.")
         return
 
     venn_sets = {
@@ -710,11 +774,11 @@ def render_venn_unique_athletes(df_2026_all_rows: pd.DataFrame) -> None:
     total_unique_general = len(universe)
 
     t1, t2, t3, t4, t5 = st.columns(5)
-    t1.metric("Total unicos 2023", format_int(totals["2023"]))
-    t2.metric("Total unicos 2024", format_int(totals["2024"]))
-    t3.metric("Total unicos 2025", format_int(totals["2025"]))
-    t4.metric("Total unicos 2026", format_int(totals["2026"]))
-    t5.metric("Total unicos geral", format_int(total_unique_general))
+    t1.metric("Total únicos 2023", format_int(totals["2023"]))
+    t2.metric("Total únicos 2024", format_int(totals["2024"]))
+    t3.metric("Total únicos 2025", format_int(totals["2025"]))
+    t4.metric("Total únicos 2026", format_int(totals["2026"]))
+    t5.metric("Total únicos geral", format_int(total_unique_general))
 
     combo_counts: dict[tuple[bool, bool, bool, bool], int] = {}
     for email in universe:
@@ -728,28 +792,28 @@ def render_venn_unique_athletes(df_2026_all_rows: pd.DataFrame) -> None:
             continue
         venn_table_rows.append(
             {
-                "Participacao": " + ".join(present),
-                "Qtde atletas unicos": count,
-                "N edicoes": len(present),
+                "Participação": " + ".join(present),
+                "Qtde atletas únicos": count,
+                "N edições": len(present),
             }
         )
     venn_table = pd.DataFrame(venn_table_rows).sort_values(
-        ["N edicoes", "Qtde atletas unicos", "Participacao"],
+        ["N edições", "Qtde atletas únicos", "Participação"],
         ascending=[False, False, True],
     )
-    venn_table["Qtde atletas unicos"] = venn_table["Qtde atletas unicos"].map(format_int)
-    st.subheader("Tabela Venn (intersecoes exatas por e-mail)")
-    st.dataframe(venn_table[["Participacao", "Qtde atletas unicos"]], hide_index=True, use_container_width=True)
+    venn_table["Qtde atletas únicos"] = venn_table["Qtde atletas únicos"].map(format_int)
+    st.subheader("Tabela Venn (interseções exatas por e-mail)")
+    st.dataframe(venn_table[["Participação", "Qtde atletas únicos"]], hide_index=True, use_container_width=True)
 
     k1, k2 = st.columns(2)
     k1.metric("Taxa de retorno 2026", format_pct(return_rate_2026))
     k2.metric("Atletas retornantes 2026", format_int(returning_2026), delta=f"Novos: {format_int(new_2026)}")
 
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("So em 1 edicao", format_int(membership[1]))
-    c2.metric("Em 2 edicoes", format_int(membership[2]))
-    c3.metric("Em 3 edicoes", format_int(membership[3]))
-    c4.metric("Em 4 edicoes", format_int(membership[4]))
+    c1.metric("Só em 1 edição", format_int(membership[1]))
+    c2.metric("Em 2 edições", format_int(membership[2]))
+    c3.metric("Em 3 edições", format_int(membership[3]))
+    c4.metric("Em 4 edições", format_int(membership[4]))
 
 
 def render_header(kpi_df: pd.DataFrame, data_base_label: str) -> None:
@@ -775,8 +839,8 @@ def render_header(kpi_df: pd.DataFrame, data_base_label: str) -> None:
     st.markdown(
         f"""
         <div class="hero">
-          <h2>Dashboard de Inscricoes 2026 - Paraty Brazil by UTMB</h2>
-          <p class="subtle">Base atualizada ate {data_base_label} | Conversao fixa: 1 USD = R$ 5,00</p>
+          <h2>Dashboard de Inscrições 2026 - Paraty Brazil by UTMB</h2>
+          <p class="subtle">Base atualizada até {data_base_label} | Conversão fixa: 1 USD = R$ 5,00</p>
         </div>
         """,
         unsafe_allow_html=True,
@@ -786,22 +850,22 @@ def render_header(kpi_df: pd.DataFrame, data_base_label: str) -> None:
     c1.metric("Inscritos ativos", format_int(total))
     c2.metric("% mulheres", format_pct(pct_female))
     c3.metric("% estrangeiros", format_pct(pct_foreigners))
-    c4.metric("Paises distintos", format_int(countries))
-    c5.metric("Receita liquida", format_currency(net_revenue))
-    c6.metric("Ticket medio", format_currency(avg_ticket))
-    c7.metric("Pagaram com cartao Nubank", format_int(nubank_total))
-    c8.metric("E-mails unicos", format_int(unique_emails))
+    c4.metric("Países distintos", format_int(countries))
+    c5.metric("Receita líquida", format_currency(net_revenue))
+    c6.metric("Ticket médio", format_currency(avg_ticket))
+    c7.metric("Pagaram com cartão Nubank", format_int(nubank_total))
+    c8.metric("E-mails únicos", format_int(unique_emails))
 
     YOPP_META_OCULOS = 300
     pct_venda_yopp = (yopp_total / YOPP_META_OCULOS * 100) if YOPP_META_OCULOS else 0
     pct_atletas_yopp = (yopp_total / total * 100) if total else 0
     y1, y2 = st.columns(2)
-    y1.metric("Oculos Yopp vendidos", format_int(yopp_total))
+    y1.metric("Óculos Yopp vendidos", format_int(yopp_total))
     y1.caption(
         f"% meta venda ({YOPP_META_OCULOS} óculos): {format_pct(pct_venda_yopp)} | "
         f"% atletas que compram: {format_pct(pct_atletas_yopp)} | Atletas totais: {format_int(total)}"
     )
-    y2.metric("Interessados no onibus oficial", format_int(bus_total))
+    y2.metric("Interessados no ônibus oficial", format_int(bus_total))
     y2.caption(f"BR: {format_int(bus_br)} | Estrangeiros: {format_int(bus_foreign)}")
 
 
@@ -823,7 +887,7 @@ def render_header_marketing(kpi_df: pd.DataFrame, data_base_label: str) -> None:
         f"""
         <div class="hero">
           <h2>Dashboard Marketing 2026 - Paraty Brazil by UTMB</h2>
-          <p class="subtle">Base atualizada ate {data_base_label} | Visao de audiencia, perfil e ritmo</p>
+          <p class="subtle">Base atualizada até {data_base_label} | Visão de audiência, perfil e ritmo</p>
         </div>
         """,
         unsafe_allow_html=True,
@@ -833,14 +897,14 @@ def render_header_marketing(kpi_df: pd.DataFrame, data_base_label: str) -> None:
     c1.metric("Inscritos ativos", format_int(total))
     c2.metric("% mulheres", format_pct(pct_female))
     c3.metric("% estrangeiros", format_pct(pct_foreigners))
-    c4.metric("Paises distintos", format_int(countries))
+    c4.metric("Países distintos", format_int(countries))
 
     yopp_pct = (yopp_total / total * 100) if total else 0
     bus_pct = (bus_total / total * 100) if total else 0
     y1, y2 = st.columns(2)
-    y1.metric("Oculos Yopp vendidos", format_int(yopp_total))
+    y1.metric("Óculos Yopp vendidos", format_int(yopp_total))
     y1.caption(f"% dos inscritos: {format_pct(yopp_pct)}")
-    y2.metric("Interessados no onibus oficial", format_int(bus_total))
+    y2.metric("Interessados no ônibus oficial", format_int(bus_total))
     y2.caption(
         f"% dos inscritos: {format_pct(bus_pct)} | BR: {format_int(bus_br)} | Estrangeiros: {format_int(bus_foreign)}"
     )
@@ -851,7 +915,8 @@ def render_header_financial(kpi_df: pd.DataFrame, data_base_label: str) -> None:
     gross = float(kpi_df["total_registration_brl"].sum())
     discounts = float(kpi_df["total_discounts_brl"].sum())
     net = float(kpi_df["net_revenue_brl"].sum())
-    avg_ticket_net = (net / total) if total else 0
+    gross_brl, gross_usd_brl, _ = revenue_split_by_currency(kpi_df, "total_registration_brl")
+    extras = compute_additional_revenue(kpi_df)
     discount_rate = (discounts / gross * 100) if gross else 0
     paying_with_discount = int(kpi_df["total_discounts_brl"].gt(0).sum())
     pct_discount_orders = (paying_with_discount / total * 100) if total else 0
@@ -860,7 +925,7 @@ def render_header_financial(kpi_df: pd.DataFrame, data_base_label: str) -> None:
         f"""
         <div class="hero">
           <h2>Dashboard Financeiro 2026 - Paraty Brazil by UTMB</h2>
-          <p class="subtle">Base atualizada ate {data_base_label} | Foco em faturamento, descontos e ticket medio</p>
+          <p class="subtle">Base atualizada até {data_base_label} | Foco em faturamento separado por origem de moeda</p>
         </div>
         """,
         unsafe_allow_html=True,
@@ -868,14 +933,20 @@ def render_header_financial(kpi_df: pd.DataFrame, data_base_label: str) -> None:
 
     c1, c2, c3, c4, c5, c6 = st.columns(6)
     c1.metric("Inscritos ativos", format_int(total))
-    c2.metric("Faturamento total", format_currency(gross))
+    c2.metric("Faturamento inscrições total", format_currency(gross))
     c3.metric("Descontos totais", format_currency(discounts))
-    c4.metric("Faturamento liquido", format_currency(net))
-    c5.metric("Ticket medio liquido", format_currency(avg_ticket_net))
+    c4.metric("Faturamento inscrições BRL", format_currency(gross_brl))
+    c5.metric("Faturamento inscrições USD (R$)", format_currency(gross_usd_brl))
     c6.metric("% desconto sobre bruto", format_pct(discount_rate))
+    x1, x2, x3 = st.columns(3)
+    x1.metric("Faturamento líquido inscrições", format_currency(net))
+    x2.metric("Faturamento Yopp (R$)", format_currency(extras["yopp_total"]))
+    x3.metric("Faturamento Ônibus PTR 17 (R$)", format_currency(extras["bus_ptr17_total"]))
     st.caption(
-        f"Inscricoes com desconto aplicado: {format_int(paying_with_discount)} "
-        f"({format_pct(pct_discount_orders)})"
+        f"Inscrições com desconto aplicado: {format_int(paying_with_discount)} "
+        f"({format_pct(pct_discount_orders)}) | "
+        f"Yopp: R$ {YOPP_PRICE_BRL:,.0f} ou USD {YOPP_PRICE_USD:,.0f} | "
+        f"Ônibus PTR 17: R$ {PTR17_BUS_PRICE_BRL:,.0f} ou USD {PTR17_BUS_PRICE_USD:,.0f}"
     )
 
 
@@ -947,7 +1018,7 @@ def build_route_summary(df: pd.DataFrame, targets: dict[str, int]) -> pd.DataFra
 
 
 def render_progress_projection(df: pd.DataFrame, targets: dict[str, int], start_date: date, end_date: date) -> None:
-    st.header("Projecoes e ritmo de vendas")
+    st.header("Projeções e ritmo de vendas")
     summary = build_route_summary(df, targets)
     table = summary.copy()
     table["Meta"] = table["meta"].map(format_int)
@@ -973,12 +1044,12 @@ def render_progress_projection(df: pd.DataFrame, targets: dict[str, int], start_
     chart_summary["pct_restante"] = 100 - chart_summary["pct_meta_cap"]
     st.subheader("Metas por percurso (inscritos atuais)")
     fig_comp = go.Figure()
-    # Parte restante ate 100% (cinza)
+    # Parte restante até 100% (cinza)
     fig_comp.add_trace(
         go.Bar(
             x=chart_summary["Percurso"],
             y=chart_summary["pct_restante"],
-            name="Restante ate meta",
+            name="Restante até meta",
             marker_color="rgba(200, 200, 200, 0.5)",
             text=[f"Meta: {int(v)}" for v in chart_summary["meta"]],
             textposition="none",
@@ -1015,7 +1086,7 @@ def render_progress_projection(df: pd.DataFrame, targets: dict[str, int], start_
         )
     )
     fig_comp = style_bar_labels(fig_comp)
-    fig_comp.update_traces(textposition="none", selector=dict(name="Restante ate meta"))
+    fig_comp.update_traces(textposition="none", selector=dict(name="Restante até meta"))
     fig_comp.update_layout(
         height=380,
         barmode="stack",
@@ -1046,7 +1117,7 @@ def render_progress_projection(df: pd.DataFrame, targets: dict[str, int], start_
         .sort_values("day")
     )
     if series.empty:
-        st.info("Sem datas suficientes para projecoes.")
+        st.info("Sem datas suficientes para projeções.")
         return
 
     series["mm7"] = series["inscricoes_diarias"].rolling(7, min_periods=1).mean()
@@ -1056,13 +1127,13 @@ def render_progress_projection(df: pd.DataFrame, targets: dict[str, int], start_
     days_left = max((end_date - series["day"].iloc[-1]).days, 0)
     proj_total = int(round(total + proj_rate * days_left))
 
-    st.subheader("Media movel e projecao")
-    st.metric("Projecao de inscritos no prazo", format_int(proj_total))
+    st.subheader("Média móvel e projeção")
+    st.metric("Projeção de inscritos no prazo", format_int(proj_total))
     fig_mm = px.line(
         series,
         x="day",
         y=["inscricoes_diarias", "mm7", "mm15", "mm30"],
-        labels={"day": "Data", "value": "Inscricoes", "variable": "Serie"},
+        labels={"day": "Data", "value": "Inscrições", "variable": "Série"},
     )
     fig_mm.update_layout(height=360)
     st.plotly_chart(fig_mm, use_container_width=True)
@@ -1072,9 +1143,9 @@ def render_demography(df: pd.DataFrame, expandido: bool = False) -> None:
     st.header("Demografia")
     valid_age = df["age"].dropna()
     c1, c2, c3 = st.columns(3)
-    c1.metric("Idade media", format_int(valid_age.mean() if not valid_age.empty else 0))
-    c2.metric("Idade minima", format_int(valid_age.min() if not valid_age.empty else 0))
-    c3.metric("Idade maxima", format_int(valid_age.max() if not valid_age.empty else 0))
+    c1.metric("Idade média", format_int(valid_age.mean() if not valid_age.empty else 0))
+    c2.metric("Idade mínima", format_int(valid_age.min() if not valid_age.empty else 0))
+    c3.metric("Idade máxima", format_int(valid_age.max() if not valid_age.empty else 0))
 
     if not valid_age.empty:
         hist = ff.create_distplot([valid_age], ["Idade"], show_hist=True, show_rug=False, bin_size=2)
@@ -1084,28 +1155,28 @@ def render_demography(df: pd.DataFrame, expandido: bool = False) -> None:
     if not expandido:
         return
 
-    st.subheader("Genero")
+    st.subheader("Gênero")
     if "gender" not in df.columns:
-        st.info("Coluna de genero nao disponivel para analise.")
+        st.info("Coluna de gênero não disponível para análise.")
     else:
         gender_raw = df["gender"].astype(str).str.strip().str.upper()
         gender_norm = pd.Series("Outros/NA", index=df.index, dtype="object")
         gender_norm.loc[gender_raw.isin(["F", "FEMALE"])] = "Feminino"
         gender_norm.loc[gender_raw.isin(["M", "MALE"])] = "Masculino"
-        gender_counts = gender_norm.value_counts().rename_axis("Genero").reset_index(name="Inscritos")
+        gender_counts = gender_norm.value_counts().rename_axis("Gênero").reset_index(name="Inscritos")
         total_gender = gender_counts["Inscritos"].sum()
         gender_counts["%"] = gender_counts["Inscritos"].apply(
             lambda v: format_pct((v / total_gender) * 100 if total_gender else 0)
         )
         col_a, col_b = st.columns(2)
         col_a.dataframe(gender_counts, hide_index=True, use_container_width=True)
-        pie_gender = px.pie(gender_counts, names="Genero", values="Inscritos", hole=0.45)
+        pie_gender = px.pie(gender_counts, names="Gênero", values="Inscritos", hole=0.45)
         pie_gender.update_layout(height=320)
         col_b.plotly_chart(pie_gender, use_container_width=True)
 
-    st.subheader("Faixas etarias")
+    st.subheader("Faixas etárias")
     if valid_age.empty:
-        st.info("Sem dados de idade para montar faixas etarias.")
+        st.info("Sem dados de idade para montar faixas etárias.")
     else:
         age_labels = ["18-24", "25-34", "35-44", "45-54", "55+"]
         age_bins = pd.cut(
@@ -1155,13 +1226,13 @@ def render_geography(df: pd.DataFrame, ibge_df: pd.DataFrame) -> None:
     st.subheader("Top Estados")
     st.dataframe(uf_counts, hide_index=True, use_container_width=True)
 
-    st.subheader("Regioes do Brasil")
+    st.subheader("Regiões do Brasil")
     col1, col2 = st.columns(2)
     col1.dataframe(reg_counts.sort_values("Inscritos", ascending=False), hide_index=True, use_container_width=True)
     pie = px.pie(reg_counts, names="Regiao", values="Inscritos", hole=0.4)
     pie.update_layout(height=320)
     col2.plotly_chart(pie, use_container_width=True)
-    st.caption("NA = cidades sem correspondencia no IBGE para mapeamento de regiao.")
+    st.caption("NA = cidades sem correspondência no IBGE para mapeamento de região.")
 
 
 def render_international(df: pd.DataFrame) -> None:
@@ -1172,18 +1243,18 @@ def render_international(df: pd.DataFrame) -> None:
         return
 
     total_inscritos = len(df)
-    nat_counts = intl["nationality_std"].fillna("NA").value_counts().rename_axis("Pais").reset_index(name="Inscritos")
+    nat_counts = intl["nationality_std"].fillna("NA").value_counts().rename_axis("País").reset_index(name="Inscritos")
     top_5 = nat_counts.head(5).copy()
     top_5["% dos inscritos totais"] = top_5["Inscritos"].apply(lambda v: format_pct((v / total_inscritos) * 100))
     st.dataframe(top_5, hide_index=True, use_container_width=True)
-    with st.expander("Lista completa de paises"):
+    with st.expander("Lista completa de países"):
         full = nat_counts.copy()
         full["% dos inscritos totais"] = full["Inscritos"].apply(lambda v: format_pct((v / total_inscritos) * 100))
         st.dataframe(full, hide_index=True, use_container_width=True)
 
 
 def render_historical(df: pd.DataFrame) -> None:
-    st.header("Comparativo historico")
+    st.header("Comparativo histórico")
     yearly = df.groupby("Ano").size().rename("Inscritos").reset_index().sort_values("Ano")
     if yearly["Ano"].nunique() <= 1:
         st.info("Somente um ano detectado no upload. Este modulo fica ativo quando houver anos adicionais.")
@@ -1191,73 +1262,73 @@ def render_historical(df: pd.DataFrame) -> None:
 
     st.plotly_chart(px.line(yearly, x="Ano", y="Inscritos", markers=True), use_container_width=True)
     if "Email" in df.columns:
-        unique_by_year = df.dropna(subset=["Email"]).groupby("Ano")["Email"].nunique().rename("Atletas unicos").reset_index()
-        fig_unique = px.bar(unique_by_year, x="Ano", y="Atletas unicos", text="Atletas unicos")
+        unique_by_year = df.dropna(subset=["Email"]).groupby("Ano")["Email"].nunique().rename("Atletas únicos").reset_index()
+        fig_unique = px.bar(unique_by_year, x="Ano", y="Atletas únicos", text="Atletas únicos")
         fig_unique = style_bar_labels(fig_unique)
         st.plotly_chart(fig_unique, use_container_width=True)
 
 
 def render_sales_patterns(df: pd.DataFrame) -> None:
-    st.header("Padroes de venda")
+    st.header("Padrões de venda")
     dated = df.dropna(subset=["Registration date"]).copy()
     if dated.empty:
-        st.info("Sem datas para analise de padrao de vendas.")
+        st.info("Sem datas para análise de padrão de vendas.")
         return
 
     dated["week"] = dated["Registration date"].dt.to_period("W").dt.start_time
     dated["day"] = dated["Registration date"].dt.date
     dated["weekday"] = dated["Registration date"].dt.day_name()
 
-    week_counts = dated.groupby("week").size().reset_index(name="Inscricoes").sort_values("week").tail(12)
-    day_counts = dated.groupby("day").size().reset_index(name="Inscricoes").sort_values("day")
-    weekday_counts = dated.groupby("weekday").size().reset_index(name="Inscricoes")
+    week_counts = dated.groupby("week").size().reset_index(name="Inscrições").sort_values("week").tail(12)
+    day_counts = dated.groupby("day").size().reset_index(name="Inscrições").sort_values("day")
+    weekday_counts = dated.groupby("weekday").size().reset_index(name="Inscrições")
     weekday_order = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
     weekday_counts["weekday"] = pd.Categorical(weekday_counts["weekday"], categories=weekday_order, ordered=True)
     weekday_counts = weekday_counts.sort_values("weekday")
 
-    fig_week = px.bar(week_counts, x="week", y="Inscricoes", title="Ultimas 12 semanas", text="Inscricoes")
+    fig_week = px.bar(week_counts, x="week", y="Inscrições", title="Últimas 12 semanas", text="Inscrições")
     fig_week = style_bar_labels(fig_week)
     st.plotly_chart(fig_week, use_container_width=True)
     col1, col2 = st.columns(2)
-    fig_days = px.bar(day_counts.tail(30), x="day", y="Inscricoes", title="Ultimos 30 dias", text="Inscricoes")
+    fig_days = px.bar(day_counts.tail(30), x="day", y="Inscrições", title="Últimos 30 dias", text="Inscrições")
     fig_days = style_bar_labels(fig_days)
     col1.plotly_chart(fig_days, use_container_width=True)
     fig_weekday = px.bar(
         weekday_counts,
         x="weekday",
-        y="Inscricoes",
-        title="Media por dia da semana",
-        text="Inscricoes",
+        y="Inscrições",
+        title="Média por dia da semana",
+        text="Inscrições",
     )
     fig_weekday = style_bar_labels(fig_weekday)
     col2.plotly_chart(fig_weekday, use_container_width=True)
 
-    day_counts["acumulado"] = day_counts["Inscricoes"].cumsum()
-    st.plotly_chart(px.line(day_counts, x="day", y="acumulado", title="Inscricoes acumuladas"), use_container_width=True)
+    day_counts["acumulado"] = day_counts["Inscrições"].cumsum()
+    st.plotly_chart(px.line(day_counts, x="day", y="acumulado", title="Inscrições acumuladas"), use_container_width=True)
 
 
 def render_horarios_venda(df: pd.DataFrame) -> None:
-    st.header("Horarios de venda")
+    st.header("Horários de venda")
     if "date_time_parsed" not in df.columns:
-        st.info("Coluna date_time nao disponivel para analise de horarios.")
+        st.info("Coluna date_time não disponível para análise de horários.")
         return
 
     local = df.dropna(subset=["date_time_parsed"]).copy()
     if local.empty:
-        st.info("Sem registros validos em date_time para analise de horarios.")
+        st.info("Sem registros válidos em date_time para análise de horários.")
         return
 
     if "sale_hour" not in local.columns:
         local["sale_hour"] = local["date_time_parsed"].dt.hour
-    hour_counts = local.groupby("sale_hour").size().reindex(range(24), fill_value=0).reset_index(name="Inscricoes")
+    hour_counts = local.groupby("sale_hour").size().reindex(range(24), fill_value=0).reset_index(name="Inscrições")
     hour_counts = hour_counts.rename(columns={"sale_hour": "Hora"})
-    peak_hour = int(hour_counts.loc[hour_counts["Inscricoes"].idxmax(), "Hora"])
-    peak_count = int(hour_counts["Inscricoes"].max())
+    peak_hour = int(hour_counts.loc[hour_counts["Inscrições"].idxmax(), "Hora"])
+    peak_count = int(hour_counts["Inscrições"].max())
     c1, c2 = st.columns(2)
-    c1.metric("Horario de pico", f"{peak_hour:02d}h")
-    c2.metric("Inscricoes no pico", format_int(peak_count))
+    c1.metric("Horário de pico", f"{peak_hour:02d}h")
+    c2.metric("Inscrições no pico", format_int(peak_count))
 
-    fig_hour = px.bar(hour_counts, x="Hora", y="Inscricoes", text="Inscricoes", title="Inscricoes por hora do dia")
+    fig_hour = px.bar(hour_counts, x="Hora", y="Inscrições", text="Inscrições", title="Inscrições por hora do dia")
     fig_hour = style_bar_labels(fig_hour)
     fig_hour.update_layout(height=340, xaxis=dict(dtick=1))
     st.plotly_chart(fig_hour, use_container_width=True)
@@ -1266,11 +1337,11 @@ def render_horarios_venda(df: pd.DataFrame) -> None:
         local["sale_period"] = pd.cut(
             local["sale_hour"],
             bins=[-0.1, 5.9, 11.9, 17.9, 23.9],
-            labels=["Madrugada", "Manha", "Tarde", "Noite"],
+            labels=["Madrugada", "Manhã", "Tarde", "Noite"],
         ).astype("object")
-        local["sale_period"] = local["sale_period"].fillna("Sem horario")
-    period_order = ["Madrugada", "Manha", "Tarde", "Noite", "Sem horario"]
-    period_counts = local["sale_period"].value_counts().reindex(period_order, fill_value=0).rename_axis("Periodo")
+        local["sale_period"] = local["sale_period"].fillna("Sem horário")
+    period_order = ["Madrugada", "Manhã", "Tarde", "Noite", "Sem horário"]
+    period_counts = local["sale_period"].value_counts().reindex(period_order, fill_value=0).rename_axis("Período")
     period_counts = period_counts.reset_index(name="Inscritos")
     total_period = int(period_counts["Inscritos"].sum())
     period_counts["%"] = period_counts["Inscritos"].apply(
@@ -1278,10 +1349,10 @@ def render_horarios_venda(df: pd.DataFrame) -> None:
     )
 
     top_period = period_counts.sort_values("Inscritos", ascending=False).iloc[0]
-    st.metric("Maior volume por periodo", f"{top_period['Periodo']} ({format_int(top_period['Inscritos'])})")
+    st.metric("Maior volume por período", f"{top_period['Período']} ({format_int(top_period['Inscritos'])})")
     p1, p2 = st.columns(2)
     p1.dataframe(period_counts, hide_index=True, use_container_width=True)
-    fig_period = px.bar(period_counts, x="Periodo", y="Inscritos", text="Inscritos", title="Inscricoes por periodo do dia")
+    fig_period = px.bar(period_counts, x="Período", y="Inscritos", text="Inscritos", title="Inscrições por período do dia")
     fig_period = style_bar_labels(fig_period)
     fig_period.update_layout(height=320)
     p2.plotly_chart(fig_period, use_container_width=True)
@@ -1291,7 +1362,7 @@ def render_team_medical_company(df: pd.DataFrame) -> None:
     st.header("Assessorias, atestado e empresa")
     total = len(df)
     if total == 0:
-        st.info("Sem dados para analise de assessorias e cadastro.")
+        st.info("Sem dados para análise de assessorias e cadastro.")
         return
 
     team_col = find_column_by_candidates(df.columns, ["Team", "Assessoria", "Assesoria", "Training team"])
@@ -1322,7 +1393,7 @@ def render_team_medical_company(df: pd.DataFrame) -> None:
 
     st.subheader("Top 10 assessorias (Team)")
     if not team_col:
-        st.info("Coluna Team nao disponivel nesta base.")
+        st.info("Coluna Team não disponível nesta base.")
         return
 
     team_raw = df[team_col].astype(str).str.strip()
@@ -1335,7 +1406,7 @@ def render_team_medical_company(df: pd.DataFrame) -> None:
     team_df["team_key"] = team_df["team_raw"].apply(canonicalize_team_name)
     team_df = team_df[team_df["team_key"] != ""].copy()
     if team_df.empty:
-        st.info("Nao foi possivel consolidar os nomes de Team.")
+        st.info("Não foi possível consolidar os nomes de Team.")
         return
 
     team_grouped = (
@@ -1360,14 +1431,14 @@ def render_team_medical_company(df: pd.DataFrame) -> None:
 
 
 def render_perfil_inscrito(df: pd.DataFrame) -> None:
-    st.header("Onibus Oficial")
+    st.header("Ônibus Oficial")
     total = len(df)
     if total == 0:
-        st.info("Sem dados para analise de onibus oficial no recorte atual.")
+        st.info("Sem dados para análise de ônibus oficial no recorte atual.")
         return
 
     if "official_bus_flag" not in df.columns:
-        st.info("Coluna de interesse no onibus oficial nao disponivel nesta base.")
+        st.info("Coluna de interesse no ônibus oficial não disponível nesta base.")
         return
 
     interested = df[df["official_bus_flag"] > 0].copy()
@@ -1390,7 +1461,7 @@ def render_perfil_inscrito(df: pd.DataFrame) -> None:
 
     st.subheader("Interesse por percurso")
     if interested.empty:
-        st.info("Nenhum interessado em onibus oficial no recorte atual.")
+        st.info("Nenhum interessado em ônibus oficial no recorte atual.")
     else:
         percurso_counts = (
             interested["Competition"]
@@ -1440,11 +1511,11 @@ def render_yopp_section(df: pd.DataFrame, ibge_df: pd.DataFrame) -> None:
     st.header("Yopp")
     total = len(df)
     if total == 0:
-        st.info("Sem dados para analise de Yopp no recorte atual.")
+        st.info("Sem dados para análise de Yopp no recorte atual.")
         return
 
     if "yopp_flag" not in df.columns:
-        st.info("Coluna Yopp nao disponivel nesta base.")
+        st.info("Coluna Yopp não disponível nesta base.")
         return
 
     yopp_buyers = df[df["yopp_flag"] > 0].copy()
@@ -1460,15 +1531,15 @@ def render_yopp_section(df: pd.DataFrame, ibge_df: pd.DataFrame) -> None:
     foreign_yopp = int((~br_mask).sum()) if "nationality_std" in yopp_buyers.columns else 0
 
     c1, c2, c3, c4, c5 = st.columns(5)
-    c1.metric("Oculos vendidos", format_int(yopp_total))
+    c1.metric("Óculos vendidos", format_int(yopp_total))
     c2.metric("% inscritos que compraram", format_pct(pct_yopp))
     c3.metric("Mulheres", format_int(female_yopp))
     c4.metric("Homens", format_int(male_yopp))
     c5.metric("Brasileiros / Estrangeiros", f"{format_int(br_yopp)} / {format_int(foreign_yopp)}")
 
-    st.subheader("Oculos vendidos por percurso")
+    st.subheader("Óculos vendidos por percurso")
     if yopp_buyers.empty:
-        st.info("Nenhum oculos Yopp vendido no recorte atual.")
+        st.info("Nenhum óculos Yopp vendido no recorte atual.")
         return
 
     yopp_by_course = (
@@ -1476,18 +1547,18 @@ def render_yopp_section(df: pd.DataFrame, ibge_df: pd.DataFrame) -> None:
         .fillna("NA")
         .value_counts()
         .rename_axis("Percurso")
-        .reset_index(name="Oculos vendidos")
+        .reset_index(name="Óculos vendidos")
     )
     order_map = {name: idx for idx, name in enumerate(PERCURSO_ORDER)}
     yopp_by_course["ordem"] = yopp_by_course["Percurso"].map(order_map).fillna(999).astype(int)
     yopp_by_course = yopp_by_course.sort_values(["ordem", "Percurso"]).drop(columns="ordem").reset_index(drop=True)
-    yopp_by_course["% do total Yopp"] = yopp_by_course["Oculos vendidos"].apply(
+    yopp_by_course["% do total Yopp"] = yopp_by_course["Óculos vendidos"].apply(
         lambda v: format_pct((v / yopp_total) * 100 if yopp_total else 0)
     )
 
     y1, y2 = st.columns(2)
     y1.dataframe(yopp_by_course, hide_index=True, use_container_width=True)
-    fig_yopp = px.bar(yopp_by_course, x="Percurso", y="Oculos vendidos", text="Oculos vendidos")
+    fig_yopp = px.bar(yopp_by_course, x="Percurso", y="Óculos vendidos", text="Óculos vendidos")
     fig_yopp = style_bar_labels(fig_yopp)
     fig_yopp.update_layout(height=340)
     y2.plotly_chart(fig_yopp, use_container_width=True)
@@ -1497,11 +1568,11 @@ def render_yopp_section(df: pd.DataFrame, ibge_df: pd.DataFrame) -> None:
         yopp_buyers,
         ibge_df=ibge_df,
         total=yopp_total,
-        count_col="Oculos vendidos",
+        count_col="Óculos vendidos",
         pct_col="% do total Yopp",
     )
     if top_cities.empty:
-        st.info("Sem cidades validas para montar ranking de Yopp.")
+        st.info("Sem cidades válidas para montar ranking de Yopp.")
     else:
         st.dataframe(top_cities, hide_index=True, use_container_width=True)
 
@@ -1509,15 +1580,15 @@ def render_yopp_section(df: pd.DataFrame, ibge_df: pd.DataFrame) -> None:
 def render_nubank_section(df: pd.DataFrame, ibge_df: pd.DataFrame) -> None:
     st.header("Nubank")
     if df.empty:
-        st.info("Sem dados para analise de Nubank no recorte atual.")
+        st.info("Sem dados para análise de Nubank no recorte atual.")
         return
 
     if "nubank_flag" not in df.columns:
-        st.info("Coluna `nubank_opt` nao disponivel nesta base.")
+        st.info("Coluna `nubank_opt` não disponível nesta base.")
         return
 
     if "source_file" not in df.columns:
-        st.info("Nao foi possivel identificar o arquivo de origem para aplicar o recorte BRL_FULL.")
+        st.info("Não foi possível identificar o arquivo de origem para aplicar o recorte BRL_FULL.")
         return
 
     br_full = df[df["source_file"].astype(str).str.contains(r"brl[\s_-]*full", case=False, na=False, regex=True)].copy()
@@ -1548,9 +1619,9 @@ def render_nubank_section(df: pd.DataFrame, ibge_df: pd.DataFrame) -> None:
     c5.metric("Outros/NA", format_int(other_nubank))
 
     a1, a2, a3 = st.columns(3)
-    a1.metric("Idade media (Nubank)", format_int(avg_age))
-    a2.metric("Idade minima", format_int(min_age))
-    a3.metric("Idade maxima", format_int(max_age))
+    a1.metric("Idade média (Nubank)", format_int(avg_age))
+    a2.metric("Idade mínima", format_int(min_age))
+    a3.metric("Idade máxima", format_int(max_age))
 
     if nubank_buyers.empty:
         st.info("Nenhum inscrito BRL_FULL comprou com desconto Nubank no recorte atual.")
@@ -1581,7 +1652,7 @@ def render_nubank_section(df: pd.DataFrame, ibge_df: pd.DataFrame) -> None:
         age_counts = (
             age_bins.value_counts()
             .reindex(age_labels, fill_value=0)
-            .rename_axis("Faixa etaria")
+            .rename_axis("Faixa etária")
             .reset_index(name="Inscritos")
         )
         age_counts["%"] = age_counts["Inscritos"].apply(
@@ -1589,7 +1660,7 @@ def render_nubank_section(df: pd.DataFrame, ibge_df: pd.DataFrame) -> None:
         )
         p2.dataframe(age_counts, hide_index=True, use_container_width=True)
     else:
-        p2.info("Sem idades validas para montar faixas etarias.")
+        p2.info("Sem idades válidas para montar faixas etárias.")
 
     st.subheader("Compras Nubank por percurso")
     by_route = (
@@ -1621,7 +1692,7 @@ def render_nubank_section(df: pd.DataFrame, ibge_df: pd.DataFrame) -> None:
         pct_col="% do total Nubank",
     )
     if top_cities.empty:
-        st.info("Sem cidades validas para montar ranking de Nubank.")
+        st.info("Sem cidades válidas para montar ranking de Nubank.")
     else:
         st.dataframe(top_cities, hide_index=True, use_container_width=True)
 
@@ -1634,7 +1705,7 @@ def render_financial(df: pd.DataFrame) -> None:
     c1, c2, c3 = st.columns(3)
     c1.metric("Receita bruta", format_currency(gross))
     c2.metric("Descontos", format_currency(discounts))
-    c3.metric("Receita liquida", format_currency(net))
+    c3.metric("Receita líquida", format_currency(net))
 
     comp = (
         df.groupby("Competition", dropna=False)
@@ -1647,50 +1718,64 @@ def render_financial(df: pd.DataFrame) -> None:
         .reset_index()
     )
     comp = sort_competitions(comp, "Competition")
-    comp["ticket_medio"] = comp.apply(
-        lambda row: row["receita_liquida"] / row["inscritos"] if row["inscritos"] else 0, axis=1
-    )
     comp_table = comp.rename(
         columns={
             "Competition": "Percurso",
             "inscritos": "Inscritos",
             "receita_bruta": "Receita Bruta (R$)",
             "descontos": "Descontos (R$)",
-            "receita_liquida": "Receita Liquida (R$)",
-            "ticket_medio": "Ticket Medio (R$)",
+            "receita_liquida": "Receita Líquida (R$)",
         }
     )
-    for col in ["Inscritos", "Receita Bruta (R$)", "Descontos (R$)", "Receita Liquida (R$)", "Ticket Medio (R$)"]:
+    for col in ["Inscritos", "Receita Bruta (R$)", "Descontos (R$)", "Receita Líquida (R$)"]:
         comp_table[col] = comp_table[col].map(format_int)
     st.dataframe(comp_table, hide_index=True, use_container_width=True)
 
     if not comp.empty:
-        st.caption("% de contribuicao em receita de cada percurso")
+        st.caption("% de contribuição em receita de cada percurso")
         fig = px.pie(comp, names="Competition", values="receita_liquida", hole=0.45)
         fig.update_layout(height=360)
         st.plotly_chart(fig, use_container_width=True)
 
 
 def render_financial_report(df: pd.DataFrame) -> None:
-    st.header("Visao consolidada financeira")
+    st.header("Visão consolidada financeira")
     gross = float(df["total_registration_brl"].sum())
     discounts = float(df["total_discounts_brl"].sum())
     net = float(df["net_revenue_brl"].sum())
+    gross_brl, gross_usd_brl, _ = revenue_split_by_currency(df, "total_registration_brl")
+    net_brl, net_usd_brl, _ = revenue_split_by_currency(df, "net_revenue_brl")
+    extras = compute_additional_revenue(df)
     total_orders = len(df)
-    avg_gross = (gross / total_orders) if total_orders else 0
-    avg_net = (net / total_orders) if total_orders else 0
     discount_rate = (discounts / gross * 100) if gross else 0
     orders_with_discount = int(df["total_discounts_brl"].gt(0).sum())
     pct_orders_with_discount = (orders_with_discount / total_orders * 100) if total_orders else 0
 
     k1, k2, k3, k4 = st.columns(4)
     k1.metric("Receita bruta total", format_currency(gross))
-    k2.metric("Receita liquida total", format_currency(net))
-    k3.metric("Ticket medio bruto", format_currency(avg_gross))
-    k4.metric("Ticket medio liquido", format_currency(avg_net))
+    k2.metric("Receita líquida total", format_currency(net))
+    k3.metric("Receita bruta BRL", format_currency(gross_brl))
+    k4.metric("Receita bruta USD (R$)", format_currency(gross_usd_brl))
     k5, k6 = st.columns(2)
     k5.metric("Taxa de desconto total", format_pct(discount_rate))
-    k6.metric("Inscricoes com cupom/desconto", format_pct(pct_orders_with_discount))
+    k6.metric("Inscrições com cupom/desconto", format_pct(pct_orders_with_discount))
+    k7, k8 = st.columns(2)
+    k7.metric("Receita líquida BRL", format_currency(net_brl))
+    k8.metric("Receita líquida USD (R$)", format_currency(net_usd_brl))
+
+    st.subheader("Receitas adicionais (fora da inscrição)")
+    a1, a2, a3 = st.columns(3)
+    a1.metric("Yopp total (R$)", format_currency(extras["yopp_total"]))
+    a2.metric("Yopp BRL / USD (R$)", f"{format_currency(extras['yopp_brl'])} / {format_currency(extras['yopp_usd_brl'])}")
+    a3.metric("Preço Yopp", f"R$ {YOPP_PRICE_BRL:,.0f} | USD {YOPP_PRICE_USD:,.0f}")
+    b1, b2, b3 = st.columns(3)
+    b1.metric("Ônibus PTR 17 total (R$)", format_currency(extras["bus_ptr17_total"]))
+    b2.metric(
+        "Ônibus BRL / USD (R$)",
+        f"{format_currency(extras['bus_ptr17_brl'])} / {format_currency(extras['bus_ptr17_usd_brl'])}",
+    )
+    b3.metric("Preço Ônibus PTR 17", f"R$ {PTR17_BUS_PRICE_BRL:,.0f} | USD {PTR17_BUS_PRICE_USD:,.0f}")
+    st.metric("Total receitas adicionais", format_currency(extras["extras_total"]))
 
     st.subheader("Performance por percurso")
     by_route = (
@@ -1704,10 +1789,6 @@ def render_financial_report(df: pd.DataFrame) -> None:
         .reset_index()
     )
     by_route = sort_competitions(by_route, "Competition")
-    by_route["ticket_medio_liquido"] = by_route.apply(
-        lambda row: row["receita_liquida"] / row["inscritos"] if row["inscritos"] else 0,
-        axis=1,
-    )
     by_route["taxa_desconto"] = by_route.apply(
         lambda row: (row["descontos"] / row["receita_bruta"] * 100) if row["receita_bruta"] else 0,
         axis=1,
@@ -1719,13 +1800,12 @@ def render_financial_report(df: pd.DataFrame) -> None:
             "inscritos": "Inscritos",
             "receita_bruta": "Receita Bruta (R$)",
             "descontos": "Descontos (R$)",
-            "receita_liquida": "Receita Liquida (R$)",
-            "ticket_medio_liquido": "Ticket Medio Liquido (R$)",
+            "receita_liquida": "Receita Líquida (R$)",
             "taxa_desconto": "Taxa de Desconto",
         }
     )
     route_table["Inscritos"] = route_table["Inscritos"].map(format_int)
-    for col in ["Receita Bruta (R$)", "Descontos (R$)", "Receita Liquida (R$)", "Ticket Medio Liquido (R$)"]:
+    for col in ["Receita Bruta (R$)", "Descontos (R$)", "Receita Líquida (R$)"]:
         route_table[col] = route_table[col].map(format_currency)
     route_table["Taxa de Desconto"] = route_table["Taxa de Desconto"].map(format_pct)
     st.dataframe(route_table, hide_index=True, use_container_width=True)
@@ -1736,7 +1816,7 @@ def render_financial_report(df: pd.DataFrame) -> None:
         x="Competition",
         y="receita_liquida",
         text="receita_liquida",
-        title="Receita liquida por percurso",
+        title="Receita líquida por percurso",
     )
     fig_net_route = style_bar_labels(fig_net_route)
     fig_net_route.update_traces(texttemplate="%{text:,.0f}")
@@ -1755,10 +1835,10 @@ def render_financial_report(df: pd.DataFrame) -> None:
     fig_discount_route.update_layout(height=340, yaxis_title="%")
     g2.plotly_chart(fig_discount_route, use_container_width=True)
 
-    st.subheader("Evolucao diaria de faturamento")
+    st.subheader("Evolução diária de faturamento")
     dated = df.dropna(subset=["Registration date"]).copy()
     if dated.empty:
-        st.info("Sem datas validas para evolucao diaria financeira.")
+        st.info("Sem datas válidas para evolução diária financeira.")
     else:
         dated["day"] = dated["Registration date"].dt.date
         daily = (
@@ -1776,7 +1856,7 @@ def render_financial_report(df: pd.DataFrame) -> None:
             daily,
             x="day",
             y=["receita_bruta", "descontos", "receita_liquida"],
-            labels={"day": "Data", "value": "Valor (R$)", "variable": "Serie"},
+            labels={"day": "Data", "value": "Valor (R$)", "variable": "Série"},
         )
         fig_daily.update_layout(height=360)
         st.plotly_chart(fig_daily, use_container_width=True)
@@ -1788,14 +1868,14 @@ def render_financial_report(df: pd.DataFrame) -> None:
     coupons = df[(coupon_code_len > 2) & (df["total_discounts_brl"] > 0)].copy()
     if coupons.empty:
         st.info(
-            "Nenhuma inscricao com cupom valido (3+ caracteres) e desconto > 0 no recorte atual."
+            "Nenhuma inscrição com cupom válido (3+ caracteres) e desconto > 0 no recorte atual."
         )
         return
 
     c1, c2, c3 = st.columns(3)
-    c1.metric("Inscricoes com cupom (>=3) e desconto", format_int(len(coupons)))
+    c1.metric("Inscrições com cupom (>=3) e desconto", format_int(len(coupons)))
     c2.metric("Total de desconto (R$)", format_currency(coupons["total_discounts_brl"].sum()))
-    c3.metric("Prefixos unicos (3 letras)", format_int(coupons["coupon_prefix"].nunique()))
+    c3.metric("Prefixos únicos (3 letras)", format_int(coupons["coupon_prefix"].nunique()))
 
     by_family = (
         coupons.groupby("coupon_family", dropna=False)
@@ -1817,15 +1897,15 @@ def render_financial_report(df: pd.DataFrame) -> None:
 
     table_family = by_family.rename(
         columns={
-            "coupon_family": "Familia de cupom",
-            "inscricoes": "Inscricoes",
+            "coupon_family": "Família de cupom",
+            "inscricoes": "Inscrições",
             "desconto_total": "Desconto Total (R$)",
-            "receita_liquida": "Receita Liquida (R$)",
-            "desconto_medio": "Desconto Medio (R$)",
+            "receita_liquida": "Receita Líquida (R$)",
+            "desconto_medio": "Desconto Médio (R$)",
         }
     )
-    table_family["Inscricoes"] = table_family["Inscricoes"].map(format_int)
-    for col in ["Desconto Total (R$)", "Receita Liquida (R$)", "Desconto Medio (R$)"]:
+    table_family["Inscrições"] = table_family["Inscrições"].map(format_int)
+    for col in ["Desconto Total (R$)", "Receita Líquida (R$)", "Desconto Médio (R$)"]:
         table_family[col] = table_family[col].map(format_currency)
     st.dataframe(table_family, hide_index=True, use_container_width=True)
 
@@ -1853,12 +1933,12 @@ def render_financial_report(df: pd.DataFrame) -> None:
 
     st.caption(
         "Este estudo considera cupom com 3+ caracteres e desconto > 0. "
-        "Classificacao atual usa `COUPON_PREFIX_RULES`."
+        "Classificação atual usa `COUPON_PREFIX_RULES`."
     )
 
 
 def render_exports(raw_df: pd.DataFrame, kpi_df: pd.DataFrame) -> None:
-    st.header("Exportacoes")
+    st.header("Exportações")
     export_df = kpi_df.copy()
     csv_bytes = export_df.to_csv(index=False).encode("utf-8")
     st.download_button(
@@ -1888,8 +1968,8 @@ def render_exports(raw_df: pd.DataFrame, kpi_df: pd.DataFrame) -> None:
 def main() -> None:
     apply_theme()
     apply_print_css()
-    st.sidebar.title("Configuracoes 2026")
-    st.sidebar.caption("Dashboard unico em Streamlit com upload manual BRL/USD.")
+    st.sidebar.title("Configurações 2026")
+    st.sidebar.caption("Dashboard único em Streamlit com upload manual BRL/USD.")
 
     uploaded_files = st.sidebar.file_uploader(
         "Envie os arquivos 2026 (BR_FULL / US_FULL)",
@@ -1898,7 +1978,7 @@ def main() -> None:
     )
     st.sidebar.markdown("---")
     tipo_relatorio = st.sidebar.radio(
-        "Selecione o relatorio",
+        "Selecione o relatório",
         options=["Geral", "Marketing", "Financeiro"],
         index=0,
         label_visibility="collapsed",
@@ -1913,7 +1993,7 @@ def main() -> None:
             value=DEFAULT_PERCURSO_TARGETS[percurso],
             step=50,
         )
-    start_date = st.sidebar.date_input("Inicio da campanha", value=date(2026, 2, 23))
+    start_date = st.sidebar.date_input("Início da campanha", value=date(2026, 2, 23))
     end_date = st.sidebar.date_input("Fim da campanha", value=date(2026, 8, 14))
     if st.sidebar.button("Imprimir / Exportar PDF", use_container_width=True):
         components.html("<script>window.print();</script>", height=0, width=0)
@@ -1927,7 +2007,7 @@ def main() -> None:
     filtered = get_filtered_base(full_df)
 
     if filtered.empty:
-        st.warning("Nao ha registros com `Registered status = True` no recorte atual.")
+        st.warning("Não há registros com `Registered status = True` no recorte atual.")
         return
 
     # Data base do relatório: última inscrição válida com horário (prioriza date_time).
@@ -1943,7 +2023,7 @@ def main() -> None:
 
     scoped = filtered.copy()
     if scoped.empty:
-        st.warning("Os filtros atuais nao retornaram dados.")
+        st.warning("Os filtros atuais não retornaram dados.")
         return
 
     ibge_df = load_ibge()
@@ -1976,7 +2056,7 @@ def main() -> None:
         render_financial_report(scoped)
         render_exports(full_df, scoped)
 
-    with st.expander("Diagnostico tecnico dos uploads"):
+    with st.expander("Diagnóstico técnico dos uploads"):
         diag = (
             full_df.groupby(["source_file", "edition_currency"])
             .size()
