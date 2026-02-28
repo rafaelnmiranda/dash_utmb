@@ -1018,7 +1018,13 @@ def build_route_summary(df: pd.DataFrame, targets: dict[str, int]) -> pd.DataFra
     return pd.concat([route_summary, total_row], ignore_index=True)
 
 
-def render_progress_projection(df: pd.DataFrame, targets: dict[str, int], start_date: date, end_date: date) -> None:
+def render_progress_projection(
+    df: pd.DataFrame,
+    targets: dict[str, int],
+    start_date: date,
+    end_date: date,
+    show_target_gauges: bool = False,
+) -> None:
     st.header("Projeções e ritmo de vendas")
     summary = build_route_summary(df, targets)
     table = summary.copy()
@@ -1098,6 +1104,43 @@ def render_progress_projection(df: pd.DataFrame, targets: dict[str, int], start_
     )
     st.plotly_chart(fig_comp, use_container_width=True)
 
+    if show_target_gauges:
+        st.subheader("Gauges de meta por percurso e total")
+        gauge_order = ["TOTAL"] + PERCURSO_ORDER
+        gauge_df = summary.copy()
+        gauge_df["Percurso"] = pd.Categorical(gauge_df["Percurso"], categories=gauge_order, ordered=True)
+        gauge_df = gauge_df.sort_values("Percurso").reset_index(drop=True)
+        gauge_cols = st.columns(3)
+        for idx, row in gauge_df.iterrows():
+            percurso = str(row["Percurso"])
+            inscritos = float(row["inscritos"])
+            meta = float(row["meta"])
+            pct_meta = float(row["pct_meta"])
+            axis_max = max(meta * 1.05, inscritos * 1.05, 1.0)
+
+            gauge_fig = go.Figure(
+                go.Indicator(
+                    mode="gauge+number",
+                    value=inscritos,
+                    number={"valueformat": ",.0f"},
+                    title={"text": f"{percurso}<br>Meta: {int(meta)}"},
+                    gauge={
+                        "axis": {"range": [0, axis_max]},
+                        "bar": {"color": "#2563eb"},
+                        "threshold": {
+                            "line": {"color": "#ef4444", "width": 3},
+                            "thickness": 0.9,
+                            "value": meta,
+                        },
+                    },
+                )
+            )
+            gauge_fig.update_layout(height=250, margin=dict(l=10, r=10, t=60, b=20))
+
+            with gauge_cols[idx % 3]:
+                st.plotly_chart(gauge_fig, use_container_width=True)
+                st.caption(f"Inscritos: {format_int(inscritos)} | % da meta: {format_pct(pct_meta)}")
+
     comp_counts = summary[summary["Percurso"] != "TOTAL"]
     meta_total = int(comp_counts["meta"].sum())
     total = len(df)
@@ -1138,6 +1181,45 @@ def render_progress_projection(df: pd.DataFrame, targets: dict[str, int], start_
     )
     fig_mm.update_layout(height=360)
     st.plotly_chart(fig_mm, use_container_width=True)
+
+
+def render_marketing_target_gauges(df: pd.DataFrame, targets: dict[str, int]) -> None:
+    st.header("Gauges de metas de atletas (Marketing)")
+    summary = build_route_summary(df, targets)
+    gauge_order = ["TOTAL"] + PERCURSO_ORDER
+    gauge_df = summary.copy()
+    gauge_df["Percurso"] = pd.Categorical(gauge_df["Percurso"], categories=gauge_order, ordered=True)
+    gauge_df = gauge_df.sort_values("Percurso").reset_index(drop=True)
+    gauge_cols = st.columns(3)
+
+    for idx, row in gauge_df.iterrows():
+        percurso = str(row["Percurso"])
+        inscritos = float(row["inscritos"])
+        meta = float(row["meta"])
+        pct_meta = float(row["pct_meta"])
+        axis_max = max(meta * 1.05, inscritos * 1.05, 1.0)
+
+        gauge_fig = go.Figure(
+            go.Indicator(
+                mode="gauge+number",
+                value=inscritos,
+                number={"valueformat": ",.0f"},
+                title={"text": f"{percurso}<br>Meta: {int(meta)}"},
+                gauge={
+                    "axis": {"range": [0, axis_max]},
+                    "bar": {"color": "#2563eb"},
+                    "threshold": {
+                        "line": {"color": "#ef4444", "width": 3},
+                        "thickness": 0.9,
+                        "value": meta,
+                    },
+                },
+            )
+        )
+        gauge_fig.update_layout(height=250, margin=dict(l=10, r=10, t=60, b=20))
+        with gauge_cols[idx % 3]:
+            st.plotly_chart(gauge_fig, use_container_width=True)
+            st.caption(f"Inscritos: {format_int(inscritos)} | % da meta: {format_pct(pct_meta)}")
 
 
 def render_demography(df: pd.DataFrame, expandido: bool = False) -> None:
@@ -2801,6 +2883,7 @@ def main() -> None:
     elif tipo_relatorio == "Marketing":
         render_header_marketing(scoped, data_base_label)
         render_progress_projection(scoped, percurso_targets, start_date, end_date)
+        render_marketing_target_gauges(scoped, percurso_targets)
         render_demography(scoped, expandido=True)
         render_geography(scoped, ibge_df)
         render_international(scoped)
