@@ -2,7 +2,7 @@ import json
 import re
 import unicodedata
 import difflib
-from datetime import date
+from datetime import date, datetime
 from io import BytesIO
 from pathlib import Path
 
@@ -28,6 +28,7 @@ YOPP_PRICE_BRL = 159.0
 YOPP_PRICE_USD = 32.0
 PTR17_BUS_PRICE_BRL = 30.0
 PTR17_BUS_PRICE_USD = 6.0
+MP_GROSS_TARGET_BRL = 2_000_000.0
 EDITION_TO_CURRENCY = {
     "691336e655be7bd5663d55ef": "USD",
     "6985ddfb09a601887cdbec29": "BRL",
@@ -1937,6 +1938,689 @@ def render_financial_report(df: pd.DataFrame) -> None:
     )
 
 
+def parse_brl_currency_series(series: pd.Series) -> pd.Series:
+    txt = (
+        series.fillna("")
+        .astype(str)
+        .str.replace("R$", "", regex=False)
+        .str.replace(" ", "", regex=False)
+        .str.replace(".", "", regex=False)
+        .str.replace(",", ".", regex=False)
+    )
+    txt = txt.replace({"": "0", "-": "0", "nan": "0", "None": "0"})
+    return pd.to_numeric(txt, errors="coerce").fillna(0.0)
+
+
+def parse_mercado_pago_datetime_series(series: pd.Series) -> pd.Series:
+    month_map = {
+        "jan": 1,
+        "fev": 2,
+        "mar": 3,
+        "abr": 4,
+        "mai": 5,
+        "jun": 6,
+        "jul": 7,
+        "ago": 8,
+        "set": 9,
+        "out": 10,
+        "nov": 11,
+        "dez": 12,
+    }
+
+    parts = series.fillna("").astype(str).str.lower().str.extract(
+        r"(?P<day>\d{1,2})\s+(?P<month>[a-z]{3})\s+(?P<hour>\d{1,2}):(?P<minute>\d{2})"
+    )
+    parsed: list[pd.Timestamp] = []
+    current_year = date.today().year
+    rolling_year = current_year
+    prev_dt: datetime | None = None
+
+    for _, row in parts.iterrows():
+        if row.isna().any():
+            parsed.append(pd.NaT)
+            continue
+        month = month_map.get(str(row["month"]).strip())
+        if month is None:
+            parsed.append(pd.NaT)
+            continue
+
+        day = int(row["day"])
+        hour = int(row["hour"])
+        minute = int(row["minute"])
+
+        try:
+            candidate = datetime(rolling_year, month, day, hour, minute)
+        except ValueError:
+            parsed.append(pd.NaT)
+            continue
+
+        # Export do MP costuma vir em ordem mais recente -> mais antiga.
+        # Quando a data "volta para frente", assume virada de ano.
+        if prev_dt is not None and candidate > prev_dt:
+            rolling_year -= 1
+            try:
+                candidate = datetime(rolling_year, month, day, hour, minute)
+            except ValueError:
+                parsed.append(pd.NaT)
+                continue
+
+        prev_dt = candidate
+        parsed.append(pd.Timestamp(candidate))
+
+    return pd.Series(parsed, index=series.index)
+
+
+def classify_mp_payment_family(value) -> str:
+    txt = str(value).strip().lower()
+    if not txt or txt in {"nan", "none"}:
+        return "Outros"
+    if "pix" in txt:
+        return "PIX"
+    if "boleto" in txt:
+        return "Boleto"
+    if "nubank" in txt:
+        return "Nubank"
+    if "mastercard" in txt:
+        return "Mastercard"
+    if "visa" in txt:
+        return "Visa"
+    if "elo" in txt:
+        return "Elo"
+    if "saldo" in txt and "mercado pago" in txt:
+        return "Saldo MP"
+    return "Outros"
+
+
+@st.cache_data(show_spinner=False)
+def load_mercado_pago_file(uploaded_file) -> pd.DataFrame:
+    df = pd.read_excel(uploaded_file, sheet_name=0, header=3)
+    df = normalize_headers(df)
+    df = df.dropna(how="all").copy()
+
+    for col in [
+        "Recebimento",
+        "Tarifas e impostos",
+        "Cancelamentos e reembolsos",
+        "Total a receber",
+    ]:
+        if col in df.columns:
+            df[f"{col}_num"] = parse_brl_currency_series(df[col])
+        else:
+            df[f"{col}_num"] = 0.0
+
+    if "Data da transação" in df.columns:
+        df["data_transacao_dt"] = parse_mercado_pago_datetime_series(df["Data da transação"])
+    else:
+        df["data_transacao_dt"] = pd.NaT
+
+    weekday_map = {
+        0: "Segunda",
+        1: "Terça",
+        2: "Quarta",
+        3: "Quinta",
+        4: "Sexta",
+        5: "Sábado",
+        6: "Domingo",
+    }
+    df["hora_transacao"] = df["data_transacao_dt"].dt.hour
+    df["dia_semana_num"] = df["data_transacao_dt"].dt.dayofweek
+    df["dia_semana"] = df["dia_semana_num"].map(weekday_map)
+    df["dia_data"] = df["data_transacao_dt"].dt.date
+
+    if "Meio de pagamento" in df.columns:
+        df["meio_pagamento_familia"] = df["Meio de pagamento"].apply(classify_mp_payment_family)
+    else:
+        df["meio_pagamento_familia"] = "Outros"
+
+    return df
+
+
+def render_dashboard_mercado_pago(df_mp: pd.DataFrame, source_name: str) -> None:
+    st.markdown(
+        f"""
+        <div class="hero">
+          <h2>Dashboard Mercado Pago - Vendas e Recebimentos</h2>
+          <p class="subtle">Arquivo: {source_name} | Foco no que foi efetivamente vendido/recebido no MP</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    if df_mp.empty:
+        st.warning("Arquivo do Mercado Pago sem dados para análise.")
+        return
+
+    available_status = sorted(df_mp["Estado"].dropna().astype(str).unique().tolist()) if "Estado" in df_mp.columns else []
+    default_status = ["Aprovado"] if "Aprovado" in available_status else available_status
+    available_payment_families = (
+        sorted(df_mp["meio_pagamento_familia"].dropna().astype(str).unique().tolist())
+        if "meio_pagamento_familia" in df_mp.columns
+        else []
+    )
+    filter_col_1, filter_col_2 = st.columns(2)
+    with filter_col_1:
+        selected_status = st.multiselect(
+            "Filtrar por estado da venda",
+            options=available_status,
+            default=default_status,
+        )
+    with filter_col_2:
+        selected_payment_families = st.multiselect(
+            "Filtrar por tipo de pagamento",
+            options=available_payment_families,
+            default=available_payment_families,
+        )
+
+    scoped = df_mp.copy()
+    if selected_status and "Estado" in scoped.columns:
+        scoped = scoped[scoped["Estado"].astype(str).isin(selected_status)].copy()
+    if selected_payment_families and "meio_pagamento_familia" in scoped.columns:
+        scoped = scoped[scoped["meio_pagamento_familia"].astype(str).isin(selected_payment_families)].copy()
+    if "data_transacao_dt" in scoped.columns and scoped["data_transacao_dt"].notna().any():
+        min_date = scoped["data_transacao_dt"].dt.date.min()
+        max_date = scoped["data_transacao_dt"].dt.date.max()
+        date_range = st.date_input(
+            "Período da análise",
+            value=(min_date, max_date),
+            min_value=min_date,
+            max_value=max_date,
+        )
+        if isinstance(date_range, tuple) and len(date_range) == 2:
+            start_date, end_date = date_range
+            scoped = scoped[
+                scoped["data_transacao_dt"].dt.date.between(start_date, end_date, inclusive="both")
+            ].copy()
+
+    if scoped.empty:
+        st.info("Sem registros para os filtros selecionados.")
+        return
+
+    gross = float(scoped["Recebimento_num"].sum())
+    fee_signed = float(scoped["Tarifas e impostos_num"].sum())
+    fee_cost = abs(fee_signed)
+    refunds = float(scoped["Cancelamentos e reembolsos_num"].sum())
+    net = float(scoped["Total a receber_num"].sum())
+    orders = len(scoped)
+    avg_ticket = net / orders if orders else 0
+    fee_rate = (fee_cost / gross * 100) if gross else 0
+    gross_target_pct = (gross / MP_GROSS_TARGET_BRL * 100) if MP_GROSS_TARGET_BRL else 0
+    approval_rate = (
+        (scoped["Estado"].astype(str).eq("Aprovado").sum() / orders * 100)
+        if orders and "Estado" in scoped.columns
+        else 0
+    )
+    refund_count = int(scoped["Cancelamentos e reembolsos_num"].lt(0).sum())
+    pix_share = (
+        (scoped["meio_pagamento_familia"].eq("PIX").sum() / orders * 100)
+        if orders and "meio_pagamento_familia" in scoped.columns
+        else 0
+    )
+    card_families = {"Nubank", "Mastercard", "Visa", "Elo"}
+    card_share = (
+        (scoped["meio_pagamento_familia"].isin(card_families).sum() / orders * 100)
+        if orders and "meio_pagamento_familia" in scoped.columns
+        else 0
+    )
+
+    c1, c2, c3, c4, c5, c6 = st.columns(6)
+    c1.metric("Transações", format_int(orders))
+    c2.metric("Bruto recebido", format_currency(gross))
+    c3.metric("Custo MP (tarifas)", format_currency(fee_cost))
+    c4.metric("Líquido recebido", format_currency(net))
+    c5.metric("Reembolsos/cancelamentos", format_currency(refunds))
+    c6.metric("Ticket médio líquido", format_currency(avg_ticket))
+    meta_col_1, meta_col_2 = st.columns([2, 1])
+    with meta_col_1:
+        st.metric(
+            "Meta bruto Mercado Pago",
+            format_currency(gross),
+            delta=f"{format_pct(gross_target_pct)} da meta de {format_currency(MP_GROSS_TARGET_BRL)}",
+        )
+        st.progress(max(min(gross_target_pct / 100, 1), 0))
+    with meta_col_2:
+        fig_meta = go.Figure(
+            go.Indicator(
+                mode="gauge+number",
+                value=gross,
+                number={"prefix": "R$ ", "valueformat": ",.0f"},
+                gauge={
+                    "axis": {"range": [0, MP_GROSS_TARGET_BRL]},
+                    "bar": {"color": "#2563eb"},
+                    "threshold": {
+                        "line": {"color": "#ef4444", "width": 4},
+                        "thickness": 0.9,
+                        "value": MP_GROSS_TARGET_BRL,
+                    },
+                },
+                title={"text": "Marcador visual da meta bruta"},
+            )
+        )
+        fig_meta.update_layout(height=220, margin=dict(l=10, r=10, t=50, b=10))
+        st.plotly_chart(fig_meta, use_container_width=True)
+
+    e1, e2, e3, e4 = st.columns(4)
+    e1.metric("Taxa média de comissão", format_pct(fee_rate))
+    e2.metric("Taxa de aprovação (filtro atual)", format_pct(approval_rate))
+    e3.metric("Participação PIX", format_pct(pix_share))
+    e4.metric("Participação cartão", format_pct(card_share))
+    st.caption(f"Qtde com cancelamento/reembolso registrado: {format_int(refund_count)}")
+
+    tab_exec, tab_fin, tab_ops = st.tabs(
+        ["Resumo executivo", "Financeiro detalhado", "Comportamento de vendas"]
+    )
+
+    with tab_exec:
+        st.subheader("Leitura executiva")
+        refund_rate = (refund_count / orders * 100) if orders else 0
+
+        def semaforo_indicator(value: float, good_limit: float, warn_limit: float, reverse: bool = False) -> str:
+            if reverse:
+                if value >= good_limit:
+                    return "Verde"
+                if value >= warn_limit:
+                    return "Amarelo"
+                return "Vermelho"
+            if value <= good_limit:
+                return "Verde"
+            if value <= warn_limit:
+                return "Amarelo"
+            return "Vermelho"
+
+        semaforo = pd.DataFrame(
+            [
+                {
+                    "Indicador": "Taxa de comissão",
+                    "Valor": format_pct(fee_rate),
+                    "Status": semaforo_indicator(fee_rate, good_limit=5.0, warn_limit=7.0),
+                    "Meta sugerida": "<= 5,00%",
+                },
+                {
+                    "Indicador": "Taxa de aprovação",
+                    "Valor": format_pct(approval_rate),
+                    "Status": semaforo_indicator(approval_rate, good_limit=90.0, warn_limit=80.0, reverse=True),
+                    "Meta sugerida": ">= 90,00%",
+                },
+                {
+                    "Indicador": "Taxa de reembolso (qtd)",
+                    "Valor": format_pct(refund_rate),
+                    "Status": semaforo_indicator(refund_rate, good_limit=1.0, warn_limit=3.0),
+                    "Meta sugerida": "<= 1,00%",
+                },
+                {
+                    "Indicador": "Participação PIX",
+                    "Valor": format_pct(pix_share),
+                    "Status": semaforo_indicator(pix_share, good_limit=35.0, warn_limit=20.0, reverse=True),
+                    "Meta sugerida": ">= 35,00%",
+                },
+            ]
+        )
+        st.dataframe(semaforo, hide_index=True, use_container_width=True)
+
+        red_count = int(semaforo["Status"].eq("Vermelho").sum())
+        yellow_count = int(semaforo["Status"].eq("Amarelo").sum())
+        if red_count > 0:
+            st.error(f"Semáforo: {red_count} indicador(es) crítico(s) e {yellow_count} em atenção.")
+        elif yellow_count > 0:
+            st.warning(f"Semáforo: {yellow_count} indicador(es) em atenção, sem críticos.")
+        else:
+            st.success("Semáforo: indicadores dentro do intervalo esperado.")
+
+        insights = []
+        if fee_rate >= 8:
+            insights.append(
+                f"Custo de comissão elevado ({format_pct(fee_rate)}). Vale revisar mix de meios de pagamento."
+            )
+        elif fee_rate <= 4:
+            insights.append(
+                f"Comissão em patamar saudável ({format_pct(fee_rate)})."
+            )
+        if pix_share >= 45:
+            insights.append(
+                f"PIX representa parcela relevante das vendas ({format_pct(pix_share)}), ajudando custo financeiro."
+            )
+        if refund_count > 0:
+            insights.append(
+                f"Foram detectadas {format_int(refund_count)} transações com reembolso/cancelamento no período."
+            )
+        if not insights:
+            insights.append("Não há alertas críticos no recorte atual.")
+
+        for msg in insights:
+            st.markdown(f"- {msg}")
+
+        action_rows: list[dict[str, str]] = []
+        if fee_rate > 7:
+            action_rows.append(
+                {
+                    "Prioridade": "Alta",
+                    "Frente": "Custo financeiro",
+                    "Ação recomendada": "Aumentar participação de PIX e revisar condições de parcelamento/captura com maior tarifa.",
+                    "Impacto esperado": "Reduzir custo de comissão e elevar margem líquida.",
+                }
+            )
+        if approval_rate < 80:
+            action_rows.append(
+                {
+                    "Prioridade": "Alta",
+                    "Frente": "Conversão de pagamento",
+                    "Ação recomendada": "Analisar causas de recusa por estado e reforçar meios alternativos (PIX/Boleto) na jornada.",
+                    "Impacto esperado": "Recuperar vendas perdidas por baixa aprovação.",
+                }
+            )
+        if refund_rate > 3:
+            action_rows.append(
+                {
+                    "Prioridade": "Média",
+                    "Frente": "Qualidade de venda",
+                    "Ação recomendada": "Auditar itens/campanhas com maior reembolso e revisar comunicação de oferta.",
+                    "Impacto esperado": "Menor devolução e maior previsibilidade de caixa.",
+                }
+            )
+        if pix_share < 20:
+            action_rows.append(
+                {
+                    "Prioridade": "Média",
+                    "Frente": "Mix de pagamento",
+                    "Ação recomendada": "Criar incentivo comercial para PIX (desconto controlado ou destaque visual no checkout).",
+                    "Impacto esperado": "Aumentar conversão com menor custo por transação.",
+                }
+            )
+        if not action_rows:
+            action_rows.append(
+                {
+                    "Prioridade": "Monitorar",
+                    "Frente": "Performance geral",
+                    "Ação recomendada": "Manter estratégia atual e acompanhar semanalmente os 4 indicadores do semáforo.",
+                    "Impacto esperado": "Sustentar resultado com controle contínuo.",
+                }
+            )
+
+        st.subheader("Ações recomendadas")
+        st.dataframe(pd.DataFrame(action_rows), hide_index=True, use_container_width=True)
+
+        split_col_1, split_col_2 = st.columns(2)
+        financial_bridge = pd.DataFrame(
+            {
+                "etapa": ["Bruto", "Tarifas", "Reembolsos", "Líquido"],
+                "valor": [gross, -fee_cost, refunds, net],
+            }
+        )
+        fig_bridge = go.Figure(
+            go.Waterfall(
+                name="Fluxo financeiro",
+                orientation="v",
+                x=financial_bridge["etapa"],
+                text=[format_currency(v) for v in financial_bridge["valor"]],
+                y=financial_bridge["valor"],
+                connector={"line": {"color": "rgb(63, 63, 63)"}},
+            )
+        )
+        fig_bridge.update_layout(height=340, title="Ponte financeira: bruto até líquido")
+        split_col_1.plotly_chart(fig_bridge, use_container_width=True)
+
+        payment_mix = (
+            scoped.groupby("meio_pagamento_familia", dropna=False)
+            .agg(transacoes=("meio_pagamento_familia", "size"), liquido=("Total a receber_num", "sum"))
+            .reset_index()
+            .sort_values("transacoes", ascending=False)
+        )
+        fig_mix = px.bar(
+            payment_mix,
+            x="meio_pagamento_familia",
+            y="transacoes",
+            text="transacoes",
+            title="Mix de meios de pagamento (quantidade)",
+        )
+        fig_mix = style_bar_labels(fig_mix)
+        fig_mix.update_layout(height=340, yaxis_title="Transações", xaxis_title="Tipo")
+        split_col_2.plotly_chart(fig_mix, use_container_width=True)
+
+    with tab_fin:
+        st.subheader("Análises financeiras")
+        by_status = (
+            scoped.groupby("Estado", dropna=False)
+            .agg(
+                transacoes=("Estado", "size"),
+                bruto=("Recebimento_num", "sum"),
+                tarifas=("Tarifas e impostos_num", "sum"),
+                liquido=("Total a receber_num", "sum"),
+            )
+            .reset_index()
+            .sort_values("transacoes", ascending=False)
+        )
+        by_status["tarifas_abs"] = by_status["tarifas"].abs()
+
+        status_table = by_status.rename(
+            columns={
+                "Estado": "Estado",
+                "transacoes": "Transações",
+                "bruto": "Bruto (R$)",
+                "tarifas_abs": "Tarifas (R$)",
+                "liquido": "Líquido (R$)",
+            }
+        )
+        status_table["Transações"] = status_table["Transações"].map(format_int)
+        for col in ["Bruto (R$)", "Tarifas (R$)", "Líquido (R$)"]:
+            status_table[col] = status_table[col].map(format_currency)
+        st.dataframe(
+            status_table[["Estado", "Transações", "Bruto (R$)", "Tarifas (R$)", "Líquido (R$)"]],
+            hide_index=True,
+            use_container_width=True,
+        )
+
+        payment_value = (
+            scoped.groupby("meio_pagamento_familia", dropna=False)
+            .agg(
+                transacoes=("meio_pagamento_familia", "size"),
+                bruto=("Recebimento_num", "sum"),
+                liquido=("Total a receber_num", "sum"),
+                tarifas=("Tarifas e impostos_num", "sum"),
+            )
+            .reset_index()
+            .sort_values("liquido", ascending=False)
+        )
+        payment_value["tarifas_abs"] = payment_value["tarifas"].abs()
+        payment_value["taxa_comissao"] = payment_value.apply(
+            lambda row: (row["tarifas_abs"] / row["bruto"] * 100) if row["bruto"] else 0,
+            axis=1,
+        )
+
+        p1, p2 = st.columns(2)
+        fig_payment_value = px.bar(
+            payment_value,
+            x="meio_pagamento_familia",
+            y="liquido",
+            text="liquido",
+            title="Líquido por tipo de meio de pagamento",
+        )
+        fig_payment_value = style_bar_labels(fig_payment_value)
+        fig_payment_value.update_traces(texttemplate="%{text:,.0f}")
+        fig_payment_value.update_layout(height=340, xaxis_title="Tipo", yaxis_title="Líquido (R$)")
+        p1.plotly_chart(fig_payment_value, use_container_width=True)
+
+        fig_payment_qty = px.pie(
+            payment_value,
+            names="meio_pagamento_familia",
+            values="transacoes",
+            hole=0.45,
+            title="Distribuição de transações por tipo",
+        )
+        fig_payment_qty.update_layout(height=340)
+        p2.plotly_chart(fig_payment_qty, use_container_width=True)
+
+        fee_table = payment_value.rename(
+            columns={
+                "meio_pagamento_familia": "Tipo de pagamento",
+                "transacoes": "Transações",
+                "bruto": "Bruto (R$)",
+                "tarifas_abs": "Tarifas (R$)",
+                "liquido": "Líquido (R$)",
+                "taxa_comissao": "Taxa comissão",
+            }
+        )
+        fee_table["Transações"] = fee_table["Transações"].map(format_int)
+        for col in ["Bruto (R$)", "Tarifas (R$)", "Líquido (R$)"]:
+            fee_table[col] = fee_table[col].map(format_currency)
+        fee_table["Taxa comissão"] = fee_table["Taxa comissão"].map(format_pct)
+        st.dataframe(
+            fee_table[["Tipo de pagamento", "Transações", "Bruto (R$)", "Tarifas (R$)", "Líquido (R$)", "Taxa comissão"]],
+            hide_index=True,
+            use_container_width=True,
+        )
+
+    with tab_ops:
+        st.subheader("Padrões de venda")
+        dated = scoped.dropna(subset=["data_transacao_dt"]).copy()
+        if dated.empty:
+            st.info("Sem datas de transação válidas para os gráficos de horário e dia da semana.")
+        else:
+            hour_counts = (
+                dated.groupby("hora_transacao")
+                .agg(transacoes=("hora_transacao", "size"), liquido=("Total a receber_num", "sum"))
+                .reindex(range(24), fill_value=0)
+                .reset_index()
+                .rename(columns={"hora_transacao": "Hora"})
+            )
+            h1, h2 = st.columns(2)
+            fig_hour_qty = px.bar(
+                hour_counts, x="Hora", y="transacoes", text="transacoes", title="Vendas por hora (quantidade)"
+            )
+            fig_hour_qty = style_bar_labels(fig_hour_qty)
+            fig_hour_qty.update_layout(height=330, xaxis=dict(dtick=1), yaxis_title="Transações")
+            h1.plotly_chart(fig_hour_qty, use_container_width=True)
+
+            fig_hour_value = px.bar(
+                hour_counts, x="Hora", y="liquido", text="liquido", title="Vendas por hora (líquido)"
+            )
+            fig_hour_value = style_bar_labels(fig_hour_value)
+            fig_hour_value.update_traces(texttemplate="%{text:,.0f}")
+            fig_hour_value.update_layout(height=330, xaxis=dict(dtick=1), yaxis_title="Líquido (R$)")
+            h2.plotly_chart(fig_hour_value, use_container_width=True)
+
+            weekday_order = ["Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado", "Domingo"]
+            weekday_counts = (
+                dated.groupby("dia_semana")
+                .agg(transacoes=("dia_semana", "size"), liquido=("Total a receber_num", "sum"))
+                .reindex(weekday_order, fill_value=0)
+                .reset_index()
+                .rename(columns={"dia_semana": "Dia da semana"})
+            )
+            d1, d2 = st.columns(2)
+            fig_weekday_qty = px.bar(
+                weekday_counts,
+                x="Dia da semana",
+                y="transacoes",
+                text="transacoes",
+                title="Vendas por dia da semana (quantidade)",
+            )
+            fig_weekday_qty = style_bar_labels(fig_weekday_qty)
+            fig_weekday_qty.update_layout(height=330, yaxis_title="Transações")
+            d1.plotly_chart(fig_weekday_qty, use_container_width=True)
+
+            fig_weekday_value = px.bar(
+                weekday_counts,
+                x="Dia da semana",
+                y="liquido",
+                text="liquido",
+                title="Vendas por dia da semana (líquido)",
+            )
+            fig_weekday_value = style_bar_labels(fig_weekday_value)
+            fig_weekday_value.update_traces(texttemplate="%{text:,.0f}")
+            fig_weekday_value.update_layout(height=330, yaxis_title="Líquido (R$)")
+            d2.plotly_chart(fig_weekday_value, use_container_width=True)
+
+            # Heatmap para identificar horários fortes por dia da semana.
+            heatmap_data = (
+                dated.groupby(["dia_semana", "hora_transacao"])
+                .size()
+                .reset_index(name="transacoes")
+                .pivot(index="dia_semana", columns="hora_transacao", values="transacoes")
+                .reindex(index=weekday_order, fill_value=0)
+                .fillna(0)
+            )
+            fig_heatmap = px.imshow(
+                heatmap_data.values,
+                x=list(heatmap_data.columns),
+                y=list(heatmap_data.index),
+                aspect="auto",
+                labels={"x": "Hora", "y": "Dia da semana", "color": "Transações"},
+                title="Mapa de calor: concentração de vendas",
+            )
+            fig_heatmap.update_layout(height=360)
+            st.plotly_chart(fig_heatmap, use_container_width=True)
+
+            daily_gross = (
+                dated.groupby("dia_data")
+                .agg(bruto=("Recebimento_num", "sum"))
+                .reset_index()
+                .sort_values("dia_data")
+            )
+            daily_gross["bruto_acumulado"] = daily_gross["bruto"].cumsum()
+            fig_cumulative = px.line(
+                daily_gross,
+                x="dia_data",
+                y="bruto_acumulado",
+                markers=True,
+                title="Evolução do bruto acumulado vs meta",
+                labels={"dia_data": "Data", "bruto_acumulado": "Bruto acumulado (R$)"},
+            )
+            fig_cumulative.add_hline(
+                y=MP_GROSS_TARGET_BRL,
+                line_color="#ef4444",
+                line_dash="dash",
+                annotation_text=f"Meta R$ {format_int(MP_GROSS_TARGET_BRL)}",
+                annotation_position="top left",
+            )
+            fig_cumulative.update_layout(height=360)
+            st.plotly_chart(fig_cumulative, use_container_width=True)
+
+            reached_target = daily_gross[daily_gross["bruto_acumulado"] >= MP_GROSS_TARGET_BRL]
+            if not reached_target.empty:
+                reached_date = reached_target.iloc[0]["dia_data"]
+                st.success(f"Meta de bruto atingida em {reached_date.strftime('%d/%m/%Y')}.")
+            else:
+                remaining = MP_GROSS_TARGET_BRL - float(daily_gross["bruto_acumulado"].iloc[-1])
+                st.info(f"Faltam {format_currency(remaining)} para atingir a meta de bruto.")
+
+        if "Descrição do item" in scoped.columns:
+            st.subheader("Top itens por faturamento líquido")
+            top_items = (
+                scoped.groupby("Descrição do item", dropna=False)
+                .agg(transacoes=("Descrição do item", "size"), liquido=("Total a receber_num", "sum"))
+                .reset_index()
+                .sort_values("liquido", ascending=False)
+                .head(10)
+            )
+            fig_items = px.bar(top_items, x="Descrição do item", y="liquido", text="liquido")
+            fig_items = style_bar_labels(fig_items)
+            fig_items.update_traces(texttemplate="%{text:,.0f}")
+            fig_items.update_layout(height=360, xaxis_tickangle=-25, yaxis_title="Líquido (R$)")
+            st.plotly_chart(fig_items, use_container_width=True)
+
+    export_cols = [
+        "Número da transação",
+        "Data da transação",
+        "data_transacao_dt",
+        "Estado",
+        "Meio de pagamento",
+        "meio_pagamento_familia",
+        "Recebimento_num",
+        "Tarifas e impostos_num",
+        "Cancelamentos e reembolsos_num",
+        "Total a receber_num",
+        "Descrição do item",
+        "Referência externa",
+    ]
+    export_cols = [col for col in export_cols if col in scoped.columns]
+    st.download_button(
+        "Baixar base Mercado Pago processada (CSV)",
+        data=scoped[export_cols].to_csv(index=False).encode("utf-8"),
+        file_name="mercado_pago_base_processada.csv",
+        mime="text/csv",
+        use_container_width=True,
+    )
+
+
 def render_exports(raw_df: pd.DataFrame, kpi_df: pd.DataFrame) -> None:
     st.header("Exportações")
     export_df = kpi_df.copy()
@@ -1979,24 +2663,46 @@ def main() -> None:
     st.sidebar.markdown("---")
     tipo_relatorio = st.sidebar.radio(
         "Selecione o relatório",
-        options=["Geral", "Marketing", "Financeiro"],
+        options=["Geral", "Marketing", "Financeiro", "Mercado Pago"],
         index=0,
         label_visibility="collapsed",
     )
-
-    st.sidebar.markdown("### Metas por percurso")
-    percurso_targets = {}
-    for percurso in PERCURSO_ORDER:
-        percurso_targets[percurso] = st.sidebar.number_input(
-            f"Meta {percurso}",
-            min_value=0,
-            value=DEFAULT_PERCURSO_TARGETS[percurso],
-            step=50,
+    uploaded_mp_file = None
+    if tipo_relatorio == "Mercado Pago":
+        uploaded_mp_file = st.sidebar.file_uploader(
+            "Arquivo de vendas Mercado Pago (xlsx)",
+            type=["xlsx"],
+            accept_multiple_files=False,
+            key="mercado_pago_file",
         )
-    start_date = st.sidebar.date_input("Início da campanha", value=date(2026, 2, 23))
-    end_date = st.sidebar.date_input("Fim da campanha", value=date(2026, 8, 14))
+
+    percurso_targets = DEFAULT_PERCURSO_TARGETS.copy()
+    start_date = date(2026, 2, 23)
+    end_date = date(2026, 8, 14)
+    if tipo_relatorio != "Mercado Pago":
+        st.sidebar.markdown("### Metas por percurso")
+        percurso_targets = {}
+        for percurso in PERCURSO_ORDER:
+            percurso_targets[percurso] = st.sidebar.number_input(
+                f"Meta {percurso}",
+                min_value=0,
+                value=DEFAULT_PERCURSO_TARGETS[percurso],
+                step=50,
+            )
+        start_date = st.sidebar.date_input("Início da campanha", value=date(2026, 2, 23))
+        end_date = st.sidebar.date_input("Fim da campanha", value=date(2026, 8, 14))
     if st.sidebar.button("Imprimir / Exportar PDF", use_container_width=True):
         components.html("<script>window.print();</script>", height=0, width=0)
+
+    if tipo_relatorio == "Mercado Pago":
+        st.markdown("<div id='print-content'>", unsafe_allow_html=True)
+        if not uploaded_mp_file:
+            st.info("Envie o arquivo de vendas Mercado Pago para ver esta aba.")
+        else:
+            df_mp = load_mercado_pago_file(uploaded_mp_file)
+            render_dashboard_mercado_pago(df_mp, uploaded_mp_file.name)
+        st.markdown("</div>", unsafe_allow_html=True)
+        return
 
     if not uploaded_files:
         st.info("Envie as planilhas para iniciar o dashboard 2026.")
