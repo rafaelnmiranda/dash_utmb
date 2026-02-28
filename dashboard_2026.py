@@ -2111,14 +2111,12 @@ def render_dashboard_mercado_pago(df_mp: pd.DataFrame, source_name: str) -> None
             default=available_payment_families,
         )
 
-    scoped = df_mp.copy()
-    if selected_status and "Estado" in scoped.columns:
-        scoped = scoped[scoped["Estado"].astype(str).isin(selected_status)].copy()
-    if selected_payment_families and "meio_pagamento_familia" in scoped.columns:
-        scoped = scoped[scoped["meio_pagamento_familia"].astype(str).isin(selected_payment_families)].copy()
-    if "data_transacao_dt" in scoped.columns and scoped["data_transacao_dt"].notna().any():
-        min_date = scoped["data_transacao_dt"].dt.date.min()
-        max_date = scoped["data_transacao_dt"].dt.date.max()
+    scoped_base = df_mp.copy()
+    if selected_payment_families and "meio_pagamento_familia" in scoped_base.columns:
+        scoped_base = scoped_base[scoped_base["meio_pagamento_familia"].astype(str).isin(selected_payment_families)].copy()
+    if "data_transacao_dt" in scoped_base.columns and scoped_base["data_transacao_dt"].notna().any():
+        min_date = scoped_base["data_transacao_dt"].dt.date.min()
+        max_date = scoped_base["data_transacao_dt"].dt.date.max()
         date_range = st.date_input(
             "Período da análise",
             value=(min_date, max_date),
@@ -2127,43 +2125,57 @@ def render_dashboard_mercado_pago(df_mp: pd.DataFrame, source_name: str) -> None
         )
         if isinstance(date_range, tuple) and len(date_range) == 2:
             start_date, end_date = date_range
-            scoped = scoped[
-                scoped["data_transacao_dt"].dt.date.between(start_date, end_date, inclusive="both")
+            scoped_base = scoped_base[
+                scoped_base["data_transacao_dt"].dt.date.between(start_date, end_date, inclusive="both")
             ].copy()
+
+    scoped = scoped_base.copy()
+    if selected_status and "Estado" in scoped.columns:
+        scoped = scoped[scoped["Estado"].astype(str).isin(selected_status)].copy()
 
     if scoped.empty:
         st.info("Sem registros para os filtros selecionados.")
         return
 
-    gross = float(scoped["Recebimento_num"].sum())
-    fee_signed = float(scoped["Tarifas e impostos_num"].sum())
+    approved_scope = scoped_base.copy()
+    if "Estado" in approved_scope.columns:
+        approved_scope = approved_scope[approved_scope["Estado"].astype(str).eq("Aprovado")].copy()
+
+    if approved_scope.empty:
+        st.info("Sem vendas com status Aprovado para o período/filtros selecionados.")
+        return
+
+    gross = float(approved_scope["Recebimento_num"].sum())
+    fee_signed = float(approved_scope["Tarifas e impostos_num"].sum())
     fee_cost = abs(fee_signed)
-    refunds = float(scoped["Cancelamentos e reembolsos_num"].sum())
-    net = float(scoped["Total a receber_num"].sum())
-    orders = len(scoped)
+    refunds = float(approved_scope["Cancelamentos e reembolsos_num"].sum())
+    net = float(approved_scope["Total a receber_num"].sum())
+    orders = len(approved_scope)
+    selected_orders = len(scoped)
+    total_orders_base = len(scoped_base)
     avg_ticket = net / orders if orders else 0
     fee_rate = (fee_cost / gross * 100) if gross else 0
     gross_target_pct = (gross / MP_GROSS_TARGET_BRL * 100) if MP_GROSS_TARGET_BRL else 0
     approval_rate = (
-        (scoped["Estado"].astype(str).eq("Aprovado").sum() / orders * 100)
-        if orders and "Estado" in scoped.columns
+        (approved_scope.shape[0] / total_orders_base * 100)
+        if total_orders_base
         else 0
     )
-    refund_count = int(scoped["Cancelamentos e reembolsos_num"].lt(0).sum())
+    refund_count = int(approved_scope["Cancelamentos e reembolsos_num"].lt(0).sum())
     pix_share = (
-        (scoped["meio_pagamento_familia"].eq("PIX").sum() / orders * 100)
-        if orders and "meio_pagamento_familia" in scoped.columns
+        (approved_scope["meio_pagamento_familia"].eq("PIX").sum() / orders * 100)
+        if orders and "meio_pagamento_familia" in approved_scope.columns
         else 0
     )
     card_families = {"Nubank", "Mastercard", "Visa", "Elo"}
     card_share = (
-        (scoped["meio_pagamento_familia"].isin(card_families).sum() / orders * 100)
-        if orders and "meio_pagamento_familia" in scoped.columns
+        (approved_scope["meio_pagamento_familia"].isin(card_families).sum() / orders * 100)
+        if orders and "meio_pagamento_familia" in approved_scope.columns
         else 0
     )
 
     c1, c2, c3, c4, c5, c6 = st.columns(6)
-    c1.metric("Transações", format_int(orders))
+    c1.metric("Transações aprovadas", format_int(orders))
     c2.metric("Bruto recebido", format_currency(gross))
     c3.metric("Custo MP (tarifas)", format_currency(fee_cost))
     c4.metric("Líquido recebido", format_currency(net))
@@ -2203,7 +2215,12 @@ def render_dashboard_mercado_pago(df_mp: pd.DataFrame, source_name: str) -> None
     e2.metric("Taxa de aprovação (filtro atual)", format_pct(approval_rate))
     e3.metric("Participação PIX", format_pct(pix_share))
     e4.metric("Participação cartão", format_pct(card_share))
-    st.caption(f"Qtde com cancelamento/reembolso registrado: {format_int(refund_count)}")
+    st.caption(
+        "Faturamento considera sempre apenas status Aprovado. "
+        f"Registros no filtro de status: {format_int(selected_orders)} | "
+        f"Registros totais no período/filtros: {format_int(total_orders_base)} | "
+        f"Qtde com cancelamento/reembolso (aprovadas): {format_int(refund_count)}"
+    )
 
     tab_exec, tab_fin, tab_ops = st.tabs(
         ["Resumo executivo", "Financeiro detalhado", "Comportamento de vendas"]
@@ -2359,7 +2376,7 @@ def render_dashboard_mercado_pago(df_mp: pd.DataFrame, source_name: str) -> None
         split_col_1.plotly_chart(fig_bridge, use_container_width=True)
 
         payment_mix = (
-            scoped.groupby("meio_pagamento_familia", dropna=False)
+            approved_scope.groupby("meio_pagamento_familia", dropna=False)
             .agg(transacoes=("meio_pagamento_familia", "size"), liquido=("Total a receber_num", "sum"))
             .reset_index()
             .sort_values("transacoes", ascending=False)
@@ -2381,35 +2398,31 @@ def render_dashboard_mercado_pago(df_mp: pd.DataFrame, source_name: str) -> None
             scoped.groupby("Estado", dropna=False)
             .agg(
                 transacoes=("Estado", "size"),
-                bruto=("Recebimento_num", "sum"),
-                tarifas=("Tarifas e impostos_num", "sum"),
-                liquido=("Total a receber_num", "sum"),
             )
             .reset_index()
             .sort_values("transacoes", ascending=False)
         )
-        by_status["tarifas_abs"] = by_status["tarifas"].abs()
+        by_status["pct"] = by_status["transacoes"].apply(
+            lambda value: (value / selected_orders * 100) if selected_orders else 0
+        )
 
         status_table = by_status.rename(
             columns={
                 "Estado": "Estado",
                 "transacoes": "Transações",
-                "bruto": "Bruto (R$)",
-                "tarifas_abs": "Tarifas (R$)",
-                "liquido": "Líquido (R$)",
+                "pct": "% no filtro de status",
             }
         )
         status_table["Transações"] = status_table["Transações"].map(format_int)
-        for col in ["Bruto (R$)", "Tarifas (R$)", "Líquido (R$)"]:
-            status_table[col] = status_table[col].map(format_currency)
+        status_table["% no filtro de status"] = status_table["% no filtro de status"].map(format_pct)
         st.dataframe(
-            status_table[["Estado", "Transações", "Bruto (R$)", "Tarifas (R$)", "Líquido (R$)"]],
+            status_table[["Estado", "Transações", "% no filtro de status"]],
             hide_index=True,
             use_container_width=True,
         )
 
         payment_value = (
-            scoped.groupby("meio_pagamento_familia", dropna=False)
+            approved_scope.groupby("meio_pagamento_familia", dropna=False)
             .agg(
                 transacoes=("meio_pagamento_familia", "size"),
                 bruto=("Recebimento_num", "sum"),
@@ -2470,10 +2483,39 @@ def render_dashboard_mercado_pago(df_mp: pd.DataFrame, source_name: str) -> None
 
     with tab_ops:
         st.subheader("Padrões de venda")
-        dated = scoped.dropna(subset=["data_transacao_dt"]).copy()
+        dated = approved_scope.dropna(subset=["data_transacao_dt"]).copy()
         if dated.empty:
             st.info("Sem datas de transação válidas para os gráficos de horário e dia da semana.")
         else:
+            st.subheader("Vendas aprovadas: dia a dia, dia da semana e hora a hora")
+            daily_counts = (
+                dated.groupby("dia_data")
+                .agg(transacoes=("dia_data", "size"), bruto=("Recebimento_num", "sum"), liquido=("Total a receber_num", "sum"))
+                .reset_index()
+                .sort_values("dia_data")
+            )
+            t1, t2 = st.columns(2)
+            fig_daily_qty = px.bar(
+                daily_counts,
+                x="dia_data",
+                y="transacoes",
+                text="transacoes",
+                title="Dia a dia (quantidade de vendas aprovadas)",
+            )
+            fig_daily_qty = style_bar_labels(fig_daily_qty)
+            fig_daily_qty.update_layout(height=320, xaxis_title="Data", yaxis_title="Transações")
+            t1.plotly_chart(fig_daily_qty, use_container_width=True)
+
+            fig_daily_gross = px.line(
+                daily_counts,
+                x="dia_data",
+                y="bruto",
+                markers=True,
+                title="Dia a dia (faturamento bruto aprovado)",
+            )
+            fig_daily_gross.update_layout(height=320, xaxis_title="Data", yaxis_title="Bruto (R$)")
+            t2.plotly_chart(fig_daily_gross, use_container_width=True)
+
             hour_counts = (
                 dated.groupby("hora_transacao")
                 .agg(transacoes=("hora_transacao", "size"), liquido=("Total a receber_num", "sum"))
@@ -2585,7 +2627,7 @@ def render_dashboard_mercado_pago(df_mp: pd.DataFrame, source_name: str) -> None
         if "Descrição do item" in scoped.columns:
             st.subheader("Top itens por faturamento líquido")
             top_items = (
-                scoped.groupby("Descrição do item", dropna=False)
+                approved_scope.groupby("Descrição do item", dropna=False)
                 .agg(transacoes=("Descrição do item", "size"), liquido=("Total a receber_num", "sum"))
                 .reset_index()
                 .sort_values("liquido", ascending=False)
@@ -2667,14 +2709,25 @@ def main() -> None:
         index=0,
         label_visibility="collapsed",
     )
-    uploaded_mp_file = None
-    if tipo_relatorio == "Mercado Pago":
-        uploaded_mp_file = st.sidebar.file_uploader(
-            "Arquivo de vendas Mercado Pago (xlsx)",
-            type=["xlsx"],
-            accept_multiple_files=False,
-            key="mercado_pago_file",
-        )
+    st.sidebar.markdown("### Arquivo acessório Mercado Pago")
+    uploaded_mp_input = st.sidebar.file_uploader(
+        "Arquivo de vendas Mercado Pago (xlsx)",
+        type=["xlsx"],
+        accept_multiple_files=False,
+        key="mercado_pago_file",
+    )
+    if uploaded_mp_input is not None:
+        st.session_state["mercado_pago_file_bytes"] = uploaded_mp_input.getvalue()
+        st.session_state["mercado_pago_file_name"] = uploaded_mp_input.name
+
+    uploaded_mp_file = uploaded_mp_input
+    if (
+        uploaded_mp_file is None
+        and "mercado_pago_file_bytes" in st.session_state
+        and "mercado_pago_file_name" in st.session_state
+    ):
+        uploaded_mp_file = BytesIO(st.session_state["mercado_pago_file_bytes"])
+        uploaded_mp_file.name = st.session_state["mercado_pago_file_name"]
 
     percurso_targets = DEFAULT_PERCURSO_TARGETS.copy()
     start_date = date(2026, 2, 23)
