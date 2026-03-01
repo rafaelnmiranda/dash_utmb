@@ -5,6 +5,7 @@ import difflib
 from datetime import date, datetime
 from io import BytesIO
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 import plotly.express as px
@@ -13,6 +14,11 @@ import plotly.graph_objects as go
 import requests
 import streamlit as st
 import streamlit.components.v1 as components
+
+try:
+    from openai import OpenAI
+except Exception:  # noqa: BLE001
+    OpenAI = None
 
 
 st.set_page_config(
@@ -54,6 +60,14 @@ REQUIRED_COLUMNS = [
     "Total registration amount",
     "Total discounts amount",
 ]
+AI_QUICK_QUESTIONS = [
+    "Quantas mulheres estão inscritas nos 4 anos de evento?",
+    "Quantos inscritos existem por ano?",
+    "Qual a receita líquida total em BRL na sessão atual?",
+    "No Mercado Pago, qual foi o total líquido recebido e a taxa média?",
+]
+AI_GENDER_CANDIDATES = ["gender", "gênero", "genero", "sexo", "sex"]
+AI_FEMALE_TOKENS = {"f", "female", "feminino", "mulher", "woman", "w"}
 
 PERCURSO_ORDER = ["PTR 108", "PTR 58", "PTR 34", "PTR 25", "PTR 17", "RUN 7"]
 DEFAULT_PERCURSO_TARGETS = {
@@ -2157,6 +2171,320 @@ def load_mercado_pago_file(uploaded_file) -> pd.DataFrame:
     return df
 
 
+def to_context_columns(columns: list[str], limit: int = 40) -> list[str]:
+    if len(columns) <= limit:
+        return columns
+    return columns[:limit] + [f"... (+{len(columns) - limit} colunas)"]
+
+
+def dataframe_sample_for_context(df: pd.DataFrame, max_rows: int = 5, max_cols: int = 12) -> list[dict[str, Any]]:
+    if df.empty:
+        return []
+    sample_cols = df.columns[:max_cols]
+    sampled = df.loc[:, sample_cols].head(max_rows).copy()
+    for col in sampled.columns:
+        if pd.api.types.is_datetime64_any_dtype(sampled[col]):
+            sampled[col] = sampled[col].astype(str)
+    return sampled.to_dict(orient="records")
+
+
+def build_session_data_context(
+    full_df: pd.DataFrame | None,
+    filtered_df: pd.DataFrame | None,
+    mp_df: pd.DataFrame | None,
+) -> dict[str, Any]:
+    context: dict[str, Any] = {"datasets": {}, "available": []}
+
+    if full_df is not None:
+        full_years = sorted(full_df["Ano"].dropna().astype(int).unique().tolist()) if "Ano" in full_df.columns else []
+        context["datasets"]["inscricoes_upload"] = {
+            "rows": int(len(full_df)),
+            "columns": to_context_columns(full_df.columns.astype(str).tolist()),
+            "years": full_years,
+            "sample": dataframe_sample_for_context(full_df),
+        }
+        context["available"].append("inscricoes_upload")
+
+    if filtered_df is not None:
+        filtered_yearly = (
+            filtered_df.groupby("Ano").size().rename("inscritos").reset_index().sort_values("Ano")
+            if "Ano" in filtered_df.columns
+            else pd.DataFrame(columns=["Ano", "inscritos"])
+        )
+        context["datasets"]["inscricoes_confirmadas"] = {
+            "rows": int(len(filtered_df)),
+            "columns": to_context_columns(filtered_df.columns.astype(str).tolist()),
+            "total_net_revenue_brl": float(filtered_df["net_revenue_brl"].sum()) if "net_revenue_brl" in filtered_df.columns else 0.0,
+            "inscritos_por_ano": filtered_yearly.to_dict(orient="records"),
+            "sample": dataframe_sample_for_context(filtered_df),
+        }
+        context["available"].append("inscricoes_confirmadas")
+
+    if mp_df is not None:
+        status_counts = (
+            mp_df["Estado"].fillna("Sem estado").astype(str).value_counts().rename_axis("estado").reset_index(name="qtd")
+            if "Estado" in mp_df.columns
+            else pd.DataFrame(columns=["estado", "qtd"])
+        )
+        context["datasets"]["mercado_pago"] = {
+            "rows": int(len(mp_df)),
+            "columns": to_context_columns(mp_df.columns.astype(str).tolist()),
+            "total_liquido_brl": float(mp_df["Total a receber_num"].sum()) if "Total a receber_num" in mp_df.columns else 0.0,
+            "status_counts": status_counts.to_dict(orient="records"),
+            "sample": dataframe_sample_for_context(mp_df),
+        }
+        context["available"].append("mercado_pago")
+
+    return context
+
+
+def detect_gender_column(df: pd.DataFrame | None) -> str | None:
+    if df is None:
+        return None
+    return find_column_by_candidates(df.columns, AI_GENDER_CANDIDATES)
+
+
+def deterministic_query_answer(question: str, filtered_df: pd.DataFrame | None, mp_df: pd.DataFrame | None) -> dict[str, Any] | None:
+    question_norm = norm_text(question)
+    question_compact = question_norm.replace(" ", "")
+    years_in_question = [int(year) for year in re.findall(r"\b(20\d{2})\b", question)]
+
+    if filtered_df is not None and ("inscrit" in question_norm or "inscricao" in question_norm):
+        if any(token in question_norm for token in ["mulher", "femin", "female"]):
+            gender_col = detect_gender_column(filtered_df)
+            if not gender_col:
+                return {
+                    "type": "limitation",
+                    "answer_text": (
+                        "Não consegui calcular mulheres inscritas porque a base carregada não tem coluna de gênero "
+                        "(ex.: gender/sexo/gênero)."
+                    ),
+                    "data": {"required_column": "gender|sexo|gênero"},
+                }
+
+            local = filtered_df.copy()
+            gender_series = local[gender_col].fillna("").astype(str).str.strip().str.lower()
+            female_mask = gender_series.isin(AI_FEMALE_TOKENS)
+            female_df = local.loc[female_mask].copy()
+
+            if years_in_question and "Ano" in female_df.columns:
+                female_df = female_df[female_df["Ano"].isin(years_in_question)].copy()
+
+            by_year = (
+                female_df.groupby("Ano").size().rename("mulheres_inscritas").reset_index().sort_values("Ano")
+                if "Ano" in female_df.columns
+                else pd.DataFrame(columns=["Ano", "mulheres_inscritas"])
+            )
+            total = int(len(female_df))
+            years = by_year["Ano"].astype(int).tolist() if not by_year.empty else []
+            label_years = ", ".join(str(y) for y in years) if years else "anos disponíveis"
+            return {
+                "type": "female_count",
+                "answer_text": f"Total de mulheres inscritas: {format_int(total)} ({label_years}).",
+                "data": {
+                    "total_mulheres_inscritas": total,
+                    "por_ano": by_year.to_dict(orient="records"),
+                    "coluna_genero_usada": gender_col,
+                },
+            }
+
+        if any(token in question_norm for token in ["quantos", "qtd", "total"]):
+            local = filtered_df.copy()
+            if years_in_question and "Ano" in local.columns:
+                local = local[local["Ano"].isin(years_in_question)].copy()
+            total = int(len(local))
+            by_year = (
+                local.groupby("Ano").size().rename("inscritos").reset_index().sort_values("Ano")
+                if "Ano" in local.columns
+                else pd.DataFrame(columns=["Ano", "inscritos"])
+            )
+            return {
+                "type": "registered_count",
+                "answer_text": f"Total de inscritos confirmados: {format_int(total)}.",
+                "data": {"total_inscritos": total, "por_ano": by_year.to_dict(orient="records")},
+            }
+
+    if mp_df is not None and ("mercadopago" in question_compact or "mp" in question_compact):
+        if any(token in question_norm for token in ["liquido", "total", "receb"]):
+            total_liquido = float(mp_df["Total a receber_num"].sum()) if "Total a receber_num" in mp_df.columns else 0.0
+            total_bruto = float(mp_df["Recebimento_num"].sum()) if "Recebimento_num" in mp_df.columns else 0.0
+            total_taxa = abs(float(mp_df["Tarifas e impostos_num"].sum())) if "Tarifas e impostos_num" in mp_df.columns else 0.0
+            taxa_media = (total_taxa / total_bruto * 100) if total_bruto else 0.0
+            return {
+                "type": "mercado_pago_totals",
+                "answer_text": (
+                    f"Mercado Pago na sessão: líquido {format_currency(total_liquido)}, "
+                    f"bruto {format_currency(total_bruto)}, taxa média {format_pct(taxa_media)}."
+                ),
+                "data": {
+                    "total_liquido_brl": total_liquido,
+                    "total_bruto_brl": total_bruto,
+                    "taxa_media_pct": taxa_media,
+                },
+            }
+
+    return None
+
+
+def get_openai_api_key() -> str | None:
+    api_key = st.secrets.get("OPENAI_API_KEY")
+    if not api_key:
+        return None
+    return str(api_key)
+
+
+def build_ai_system_prompt() -> str:
+    return (
+        "Você é um analista de dados do dashboard Paraty by UTMB. "
+        "Responda sempre em português, seja objetivo e não invente valores. "
+        "Use apenas os dados recebidos no contexto da sessão. "
+        "Quando faltar coluna/dado, explique claramente a limitação e sugira o campo necessário. "
+        "Para perguntas quantitativas com resultado determinístico recebido, preserve exatamente os números."
+    )
+
+
+def call_openai_for_dashboard_chat(
+    user_prompt: str,
+    context_payload: dict[str, Any],
+    deterministic_result: dict[str, Any] | None,
+    chat_history: list[dict[str, str]],
+) -> str:
+    if OpenAI is None:
+        return "Não consegui usar OpenAI porque a biblioteca `openai` não está instalada no ambiente."
+
+    api_key = get_openai_api_key()
+    if not api_key:
+        return (
+            "A integração OpenAI não está configurada. "
+            "Adicione `OPENAI_API_KEY` em `.streamlit/secrets.toml` para habilitar respostas com IA."
+        )
+
+    model = str(st.secrets.get("OPENAI_MODEL", "gpt-4o-mini"))
+    client = OpenAI(api_key=api_key)
+    context_json = json.dumps(context_payload, ensure_ascii=False, default=str)
+    if len(context_json) > 20000:
+        context_json = context_json[:20000] + "... [contexto truncado]"
+
+    history_to_send = chat_history[-6:] if chat_history else []
+    messages: list[dict[str, str]] = [{"role": "system", "content": build_ai_system_prompt()}]
+    for item in history_to_send:
+        role = item.get("role", "")
+        content = item.get("content", "")
+        if role in {"user", "assistant"} and content:
+            messages.append({"role": role, "content": content})
+
+    deterministic_json = json.dumps(deterministic_result, ensure_ascii=False, default=str) if deterministic_result else "null"
+    messages.append(
+        {
+            "role": "user",
+            "content": (
+                "Contexto da sessão (JSON):\n"
+                f"{context_json}\n\n"
+                "Resultado determinístico pré-calculado (use os números exatamente, se presente):\n"
+                f"{deterministic_json}\n\n"
+                f"Pergunta do usuário: {user_prompt}"
+            ),
+        }
+    )
+
+    try:
+        response = client.chat.completions.create(
+            model=model,
+            temperature=0.1,
+            messages=messages,
+        )
+        answer = response.choices[0].message.content if response.choices else ""
+        return str(answer).strip() if answer else "Não consegui gerar resposta agora. Tente reformular a pergunta."
+    except Exception as exc:  # noqa: BLE001
+        return f"Falha ao consultar OpenAI: {exc}"
+
+
+def render_dashboard_ia(
+    full_df: pd.DataFrame | None,
+    filtered_df: pd.DataFrame | None,
+    mp_df: pd.DataFrame | None,
+) -> None:
+    st.markdown(
+        """
+        <div class="hero">
+          <h2>Aba IA - Perguntas livres sobre os dados da sessão</h2>
+          <p class="subtle">Formato de chat para explorar inscrições e Mercado Pago com base nos uploads atuais.</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    if full_df is None and mp_df is None:
+        st.info("Envie ao menos uma planilha principal ou um arquivo Mercado Pago para usar a aba IA.")
+        return
+
+    context_payload = build_session_data_context(full_df, filtered_df, mp_df)
+    datasets_label = ", ".join(context_payload.get("available", [])) if context_payload.get("available") else "nenhum"
+    st.caption(f"Contexto disponível na sessão: {datasets_label}")
+
+    if "ia_chat_messages" not in st.session_state:
+        st.session_state["ia_chat_messages"] = [
+            {
+                "role": "assistant",
+                "content": "Pronto para analisar seus dados da sessão. Faça uma pergunta objetiva em linguagem natural.",
+            }
+        ]
+
+    quick_cols = st.columns(2)
+    selected_quick_prompt = None
+    for idx, question in enumerate(AI_QUICK_QUESTIONS):
+        target_col = quick_cols[idx % 2]
+        with target_col:
+            if st.button(question, key=f"quick_ai_{idx}", use_container_width=True):
+                selected_quick_prompt = question
+
+    action_col_1, action_col_2 = st.columns([1, 4])
+    with action_col_1:
+        if st.button("Limpar conversa", use_container_width=True):
+            st.session_state["ia_chat_messages"] = [
+                {
+                    "role": "assistant",
+                    "content": "Conversa reiniciada. Pode enviar a próxima pergunta.",
+                }
+            ]
+            st.rerun()
+    with action_col_2:
+        st.caption("Perguntas quantitativas tentam cálculo em pandas antes da chamada ao modelo.")
+
+    for msg in st.session_state["ia_chat_messages"]:
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
+
+    typed_prompt = st.chat_input("Ex.: quantas mulheres estão inscritas nos 4 anos de evento?")
+    user_prompt = selected_quick_prompt or typed_prompt
+    if not user_prompt:
+        return
+
+    st.session_state["ia_chat_messages"].append({"role": "user", "content": user_prompt})
+    with st.chat_message("user"):
+        st.markdown(user_prompt)
+
+    deterministic_result = deterministic_query_answer(user_prompt, filtered_df, mp_df)
+    history = st.session_state["ia_chat_messages"][:-1]
+    if deterministic_result is not None and not get_openai_api_key():
+        assistant_text = deterministic_result.get("answer_text", "Não consegui calcular esta pergunta.")
+    else:
+        assistant_text = call_openai_for_dashboard_chat(
+            user_prompt=user_prompt,
+            context_payload=context_payload,
+            deterministic_result=deterministic_result,
+            chat_history=history,
+        )
+
+    if deterministic_result and deterministic_result.get("data"):
+        details_json = json.dumps(deterministic_result["data"], ensure_ascii=False, default=str, indent=2)
+        assistant_text = f"{assistant_text}\n\n```json\n{details_json}\n```"
+
+    st.session_state["ia_chat_messages"].append({"role": "assistant", "content": assistant_text})
+    with st.chat_message("assistant"):
+        st.markdown(assistant_text)
+
+
 def render_dashboard_mercado_pago(df_mp: pd.DataFrame, source_name: str) -> None:
     st.markdown(
         f"""
@@ -2787,7 +3115,7 @@ def main() -> None:
     st.sidebar.markdown("---")
     tipo_relatorio = st.sidebar.radio(
         "Selecione o relatório",
-        options=["Geral", "Marketing", "Financeiro", "Mercado Pago"],
+        options=["Geral", "Marketing", "Financeiro", "Mercado Pago", "IA"],
         index=0,
         label_visibility="collapsed",
     )
@@ -2829,23 +3157,37 @@ def main() -> None:
     if st.sidebar.button("Imprimir / Exportar PDF", use_container_width=True):
         components.html("<script>window.print();</script>", height=0, width=0)
 
+    full_df: pd.DataFrame | None = None
+    filtered: pd.DataFrame | None = None
+    if uploaded_files:
+        dfs = [preprocess_uploaded_file(file) for file in uploaded_files]
+        full_df = pd.concat(dfs, ignore_index=True)
+        filtered = get_filtered_base(full_df)
+
+    df_mp: pd.DataFrame | None = None
+    mp_source_name = ""
+    if uploaded_mp_file:
+        df_mp = load_mercado_pago_file(uploaded_mp_file)
+        mp_source_name = uploaded_mp_file.name
+
     if tipo_relatorio == "Mercado Pago":
         st.markdown("<div id='print-content'>", unsafe_allow_html=True)
-        if not uploaded_mp_file:
+        if df_mp is None:
             st.info("Envie o arquivo de vendas Mercado Pago para ver esta aba.")
         else:
-            df_mp = load_mercado_pago_file(uploaded_mp_file)
-            render_dashboard_mercado_pago(df_mp, uploaded_mp_file.name)
+            render_dashboard_mercado_pago(df_mp, mp_source_name)
         st.markdown("</div>", unsafe_allow_html=True)
         return
 
-    if not uploaded_files:
-        st.info("Envie as planilhas para iniciar o dashboard 2026.")
+    if tipo_relatorio == "IA":
+        st.markdown("<div id='print-content'>", unsafe_allow_html=True)
+        render_dashboard_ia(full_df=full_df, filtered_df=filtered, mp_df=df_mp)
+        st.markdown("</div>", unsafe_allow_html=True)
         return
 
-    dfs = [preprocess_uploaded_file(file) for file in uploaded_files]
-    full_df = pd.concat(dfs, ignore_index=True)
-    filtered = get_filtered_base(full_df)
+    if full_df is None or filtered is None:
+        st.info("Envie as planilhas para iniciar o dashboard 2026.")
+        return
 
     if filtered.empty:
         st.warning("Não há registros com `Registered status = True` no recorte atual.")
