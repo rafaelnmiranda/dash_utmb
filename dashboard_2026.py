@@ -708,10 +708,8 @@ def preprocess_uploaded_file(uploaded_file) -> pd.DataFrame:
     # KPI oficial: considerar inscrições ativas. Em algumas bases antigas, o status vem como COMPLETED.
     if registered_status_col:
         status_series = df.get(registered_status_col)
-        if normalize_col_name(registered_status_col) == "status":
-            df["is_registered"] = is_registered_status_series(status_series)
-        else:
-            df["is_registered"] = status_series.apply(to_bool)
+        # Usa parser de status textual para cobrir variações como COMPLETED/PAID/CONFIRMED.
+        df["is_registered"] = is_registered_status_series(status_series)
     else:
         df["is_registered"] = False
     competition_col = pick_existing_column(df.columns, ["Competition"])
