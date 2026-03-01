@@ -117,6 +117,24 @@ HISTORICAL_VENN_FILES = {
         "UTMB - 2025 - USD.xlsx",
     ],
 }
+HISTORICAL_AI_GITHUB_SOURCES = [
+    {
+        "name": "UTMB - 2023 - USD.xlsx [GITHUB]",
+        "url": "https://raw.githubusercontent.com/rafaelnmiranda/dash_utmb/main/UTMB%20-%202023%20-%20USD.xlsx",
+    },
+    {
+        "name": "UTMB - 2024 - USD.xlsx [GITHUB]",
+        "url": "https://raw.githubusercontent.com/rafaelnmiranda/dash_utmb/main/UTMB%20-%202024%20-%20USD.xlsx",
+    },
+    {
+        "name": "UTMB - 2025 - USD.xlsx [GITHUB]",
+        "url": "https://raw.githubusercontent.com/rafaelnmiranda/dash_utmb/main/UTMB%20-%202025%20-%20USD.xlsx",
+    },
+    {
+        "name": "UTMB - 2025 - BRL.xlsx [GITHUB]",
+        "url": "https://raw.githubusercontent.com/rafaelnmiranda/dash_utmb/main/UTMB%20-%202025%20-%20BRL.xlsx",
+    },
+]
 
 
 def apply_theme() -> None:
@@ -685,10 +703,11 @@ def validate_columns(df: pd.DataFrame, source_name: str) -> list[str]:
     return missing
 
 
-def preprocess_uploaded_file(uploaded_file) -> pd.DataFrame:
+def preprocess_uploaded_file(uploaded_file, validate_required: bool = True) -> pd.DataFrame:
     df = pd.read_excel(uploaded_file, sheet_name=0)
     df = normalize_headers(df)
-    validate_columns(df, uploaded_file.name)
+    if validate_required:
+        validate_columns(df, uploaded_file.name)
 
     df["source_file"] = uploaded_file.name
     registration_col = pick_existing_column(df.columns, ["Registration date", "Registration Date"])
@@ -2324,6 +2343,7 @@ def build_ai_upload_diagnostic(full_df: pd.DataFrame | None, filtered_df: pd.Dat
         return pd.DataFrame(
             columns=[
                 "Arquivo",
+                "Origem",
                 "Linhas upload",
                 "Linhas inscritas",
                 "Status reconhecido (%)",
@@ -2355,6 +2375,7 @@ def build_ai_upload_diagnostic(full_df: pd.DataFrame | None, filtered_df: pd.Dat
         grouped_rows.append(
             {
                 "Arquivo": source_name,
+                "Origem": "GitHub histórico" if "[GITHUB]" in source_name else "Upload sessão",
                 "Linhas upload": upload_rows,
                 "Linhas inscritas": registered_rows,
                 "Status reconhecido (%)": recognized_pct,
@@ -2424,6 +2445,54 @@ def build_session_data_context(
         context["available"].append("mercado_pago")
 
     return context
+
+
+@st.cache_data(show_spinner=False)
+def load_historical_ai_github_full_df() -> pd.DataFrame:
+    historical_dfs: list[pd.DataFrame] = []
+    for source in HISTORICAL_AI_GITHUB_SOURCES:
+        source_url = source.get("url", "")
+        source_name = source.get("name", "historico.xlsx")
+        if not source_url:
+            continue
+        try:
+            response = requests.get(source_url, timeout=30)
+            response.raise_for_status()
+            file_bytes = BytesIO(response.content)
+            file_bytes.name = str(source_name)
+            hist_df = preprocess_uploaded_file(file_bytes, validate_required=False)
+            inferred_year = infer_year_from_filename(source_name)
+            if inferred_year is not None:
+                # Bases históricas representam a edição do evento; fixa ano pela fonte.
+                hist_df["Ano"] = pd.Series(inferred_year, index=hist_df.index, dtype="Int64")
+            historical_dfs.append(hist_df)
+        except Exception:  # noqa: BLE001
+            continue
+
+    if not historical_dfs:
+        return pd.DataFrame()
+    return pd.concat(historical_dfs, ignore_index=True)
+
+
+def build_ia_base(
+    uploaded_full_df: pd.DataFrame | None,
+    include_github_history: bool,
+) -> tuple[pd.DataFrame | None, pd.DataFrame | None]:
+    frames: list[pd.DataFrame] = []
+    if uploaded_full_df is not None and not uploaded_full_df.empty:
+        frames.append(uploaded_full_df.copy())
+
+    if include_github_history:
+        github_hist_df = load_historical_ai_github_full_df()
+        if not github_hist_df.empty:
+            frames.append(github_hist_df.copy())
+
+    if not frames:
+        return None, None
+
+    full_df = pd.concat(frames, ignore_index=True)
+    filtered_df = get_filtered_base(full_df)
+    return full_df, filtered_df
 
 
 def detect_gender_column(df: pd.DataFrame | None) -> str | None:
@@ -3479,6 +3548,10 @@ def main() -> None:
         index=0,
         label_visibility="collapsed",
     )
+    include_github_history_ia = st.sidebar.checkbox(
+        "IA: incluir histórico GitHub (2023-2025)",
+        value=True,
+    )
     st.sidebar.markdown("### Arquivo acessório Mercado Pago")
     uploaded_mp_input = st.sidebar.file_uploader(
         "Arquivo de vendas Mercado Pago (xlsx)",
@@ -3541,7 +3614,11 @@ def main() -> None:
 
     if tipo_relatorio == "IA":
         st.markdown("<div id='print-content'>", unsafe_allow_html=True)
-        render_dashboard_ia(full_df=full_df, filtered_df=filtered, mp_df=df_mp)
+        ia_full_df, ia_filtered_df = build_ia_base(
+            uploaded_full_df=full_df,
+            include_github_history=include_github_history_ia,
+        )
+        render_dashboard_ia(full_df=ia_full_df, filtered_df=ia_filtered_df, mp_df=df_mp)
         st.markdown("</div>", unsafe_allow_html=True)
         return
 
