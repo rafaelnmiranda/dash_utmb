@@ -2286,6 +2286,69 @@ def to_context_columns(columns: list[str], limit: int = 40) -> list[str]:
     return columns[:limit] + [f"... (+{len(columns) - limit} colunas)"]
 
 
+def format_years_for_debug(series: pd.Series) -> str:
+    numeric_years = pd.to_numeric(series, errors="coerce").dropna().astype(int)
+    valid_years = sorted({year for year in numeric_years.tolist() if MIN_VALID_YEAR <= year <= MAX_VALID_YEAR})
+    if not valid_years:
+        return "-"
+    return ", ".join(str(year) for year in valid_years)
+
+
+def build_ai_upload_diagnostic(full_df: pd.DataFrame | None, filtered_df: pd.DataFrame | None) -> pd.DataFrame:
+    if full_df is None or full_df.empty:
+        return pd.DataFrame(
+            columns=[
+                "Arquivo",
+                "Linhas upload",
+                "Linhas inscritas",
+                "Status reconhecido (%)",
+                "Anos no upload",
+                "Anos nas inscritas",
+                "Sem ano (upload)",
+                "Sem ano (inscritas)",
+            ]
+        )
+
+    grouped_rows: list[dict[str, Any]] = []
+    source_series = full_df["source_file"] if "source_file" in full_df.columns else pd.Series(["(sem origem)"] * len(full_df))
+    for source_name, source_df in full_df.groupby(source_series):
+        source_name = str(source_name)
+        upload_rows = int(len(source_df))
+        missing_year_upload = int(source_df["Ano"].isna().sum()) if "Ano" in source_df.columns else upload_rows
+        upload_years = format_years_for_debug(source_df["Ano"]) if "Ano" in source_df.columns else "-"
+
+        if filtered_df is not None and "source_file" in filtered_df.columns:
+            registered_df = filtered_df[filtered_df["source_file"].astype(str) == source_name].copy()
+        else:
+            registered_df = pd.DataFrame(columns=source_df.columns)
+
+        registered_rows = int(len(registered_df))
+        missing_year_registered = int(registered_df["Ano"].isna().sum()) if "Ano" in registered_df.columns else registered_rows
+        registered_years = format_years_for_debug(registered_df["Ano"]) if "Ano" in registered_df.columns else "-"
+        recognized_pct = (registered_rows / upload_rows * 100) if upload_rows else 0.0
+
+        grouped_rows.append(
+            {
+                "Arquivo": source_name,
+                "Linhas upload": upload_rows,
+                "Linhas inscritas": registered_rows,
+                "Status reconhecido (%)": recognized_pct,
+                "Anos no upload": upload_years,
+                "Anos nas inscritas": registered_years,
+                "Sem ano (upload)": missing_year_upload,
+                "Sem ano (inscritas)": missing_year_registered,
+            }
+        )
+
+    diag_df = pd.DataFrame(grouped_rows).sort_values("Linhas upload", ascending=False).reset_index(drop=True)
+    diag_df["Linhas upload"] = diag_df["Linhas upload"].map(format_int)
+    diag_df["Linhas inscritas"] = diag_df["Linhas inscritas"].map(format_int)
+    diag_df["Sem ano (upload)"] = diag_df["Sem ano (upload)"].map(format_int)
+    diag_df["Sem ano (inscritas)"] = diag_df["Sem ano (inscritas)"].map(format_int)
+    diag_df["Status reconhecido (%)"] = diag_df["Status reconhecido (%)"].map(format_pct)
+    return diag_df
+
+
 def build_session_data_context(
     full_df: pd.DataFrame | None,
     filtered_df: pd.DataFrame | None,
@@ -2712,6 +2775,17 @@ def render_dashboard_ia(
             st.rerun()
     with action_col_2:
         st.caption("Perguntas quantitativas tentam cálculo em pandas antes da chamada ao modelo.")
+
+    with st.expander("Diagnóstico de leitura da base (IA)", expanded=False):
+        diagnostic_df = build_ai_upload_diagnostic(full_df, filtered_df)
+        if diagnostic_df.empty:
+            st.info("Sem planilhas principais carregadas na sessão para diagnóstico.")
+        else:
+            st.dataframe(diagnostic_df, hide_index=True, use_container_width=True)
+            st.caption(
+                "Use esta tabela para validar se anos antigos foram detectados por arquivo e "
+                "se os status de inscrição estão sendo reconhecidos."
+            )
 
     for msg in st.session_state["ia_chat_messages"]:
         with st.chat_message(msg["role"]):
