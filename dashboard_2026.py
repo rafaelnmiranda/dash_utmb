@@ -60,14 +60,19 @@ REQUIRED_COLUMNS = [
     "Total registration amount",
     "Total discounts amount",
 ]
-AI_QUICK_QUESTIONS = [
+AI_QUICK_QUESTIONS_INSCRICOES = [
     "Quantas mulheres estão inscritas nos 4 anos de evento?",
     "Quantos inscritos existem por ano?",
     "Qual a receita líquida total em BRL na sessão atual?",
+]
+AI_QUICK_QUESTIONS_MP = [
     "No Mercado Pago, qual foi o total líquido recebido e a taxa média?",
 ]
 AI_GENDER_CANDIDATES = ["gender", "gênero", "genero", "sexo", "sex"]
-AI_FEMALE_TOKENS = {"f", "female", "feminino", "mulher", "woman", "w"}
+AI_FEMALE_TOKENS = {"f", "female"}
+AI_MALE_TOKENS = {"m", "male"}
+MIN_VALID_YEAR = 2018
+MAX_VALID_YEAR = 2035
 
 PERCURSO_ORDER = ["PTR 108", "PTR 58", "PTR 34", "PTR 25", "PTR 17", "RUN 7"]
 DEFAULT_PERCURSO_TARGETS = {
@@ -477,6 +482,100 @@ def pick_existing_column(columns, candidates):
     return None
 
 
+def safe_series(df: pd.DataFrame, column_name: str | None, default_value="") -> pd.Series:
+    if column_name and column_name in df.columns:
+        return df[column_name]
+    return pd.Series(default_value, index=df.index)
+
+
+def parse_datetime_series_flexible(series: pd.Series | None) -> pd.Series:
+    if series is None:
+        return pd.Series(pd.NaT)
+
+    parsed = pd.to_datetime(series, errors="coerce")
+    fallback_mask = parsed.isna() & series.notna()
+    if fallback_mask.any():
+        parsed.loc[fallback_mask] = pd.to_datetime(series.loc[fallback_mask], errors="coerce", dayfirst=True)
+
+    numeric_guess = pd.to_numeric(series, errors="coerce")
+    excel_mask = parsed.isna() & numeric_guess.notna()
+    if excel_mask.any():
+        parsed.loc[excel_mask] = pd.to_datetime(
+            numeric_guess.loc[excel_mask],
+            errors="coerce",
+            origin="1899-12-30",
+            unit="D",
+        )
+    return parsed
+
+
+def infer_year_from_filename(file_name: str) -> int | None:
+    match = re.search(r"(20\d{2})", str(file_name))
+    if not match:
+        return None
+    year = int(match.group(1))
+    if MIN_VALID_YEAR <= year <= MAX_VALID_YEAR:
+        return year
+    return None
+
+
+def build_year_series(
+    registration_dt: pd.Series,
+    date_time_dt: pd.Series,
+    source_file_name: str,
+) -> pd.Series:
+    years = pd.Series(pd.NA, index=registration_dt.index, dtype="Int64")
+    reg_year = registration_dt.dt.year.astype("Int64")
+    dt_year = date_time_dt.dt.year.astype("Int64")
+
+    years.loc[reg_year.notna()] = reg_year.loc[reg_year.notna()]
+    dt_fallback_mask = years.isna() & dt_year.notna()
+    years.loc[dt_fallback_mask] = dt_year.loc[dt_fallback_mask]
+
+    inferred_year = infer_year_from_filename(source_file_name)
+    if inferred_year is not None:
+        years.loc[years.isna()] = inferred_year
+
+    valid_range_mask = years.between(MIN_VALID_YEAR, MAX_VALID_YEAR, inclusive="both")
+    years.loc[~valid_range_mask.fillna(False)] = pd.NA
+    return years
+
+
+def female_mask_from_series(series: pd.Series) -> pd.Series:
+    normalized = series.fillna("").astype(str).str.strip().str.lower()
+    return normalized.isin(AI_FEMALE_TOKENS)
+
+
+def male_mask_from_series(series: pd.Series) -> pd.Series:
+    normalized = series.fillna("").astype(str).str.strip().str.lower()
+    return normalized.isin(AI_MALE_TOKENS)
+
+
+def get_gender_series(df: pd.DataFrame) -> pd.Series:
+    gender_col = find_column_by_candidates(df.columns, AI_GENDER_CANDIDATES)
+    if not gender_col:
+        return pd.Series("", index=df.index)
+    return df[gender_col]
+
+
+def count_female_entries(df: pd.DataFrame) -> int:
+    if df.empty:
+        return 0
+    return int(female_mask_from_series(get_gender_series(df)).sum())
+
+
+def count_male_entries(df: pd.DataFrame) -> int:
+    if df.empty:
+        return 0
+    return int(male_mask_from_series(get_gender_series(df)).sum())
+
+
+def get_mp_approved_scope(df_mp: pd.DataFrame) -> pd.DataFrame:
+    if "Estado" not in df_mp.columns:
+        return df_mp.copy()
+    return df_mp[df_mp["Estado"].astype(str).eq("Aprovado")].copy()
+
+
 def classify_coupon_prefix(code: str) -> str:
     if pd.isna(code):
         return "SEM_CUPOM"
@@ -566,21 +665,28 @@ def preprocess_uploaded_file(uploaded_file) -> pd.DataFrame:
     validate_columns(df, uploaded_file.name)
 
     df["source_file"] = uploaded_file.name
-    df["Registration date"] = pd.to_datetime(df.get("Registration date"), errors="coerce")
-    df["birthdate"] = pd.to_datetime(df.get("birthdate"), errors="coerce")
-    df["Ano"] = df["Registration date"].dt.year.fillna(2026).astype(int)
+    registration_col = pick_existing_column(df.columns, ["Registration date", "Registration Date"])
+    registration_raw = safe_series(df, registration_col, default_value=pd.NA)
+    df["Registration date"] = parse_datetime_series_flexible(registration_raw)
+
+    birthdate_col = pick_existing_column(df.columns, ["birthdate", "Birthdate", "Birth date"])
+    birthdate_raw = safe_series(df, birthdate_col, default_value=pd.NA)
+    df["birthdate"] = parse_datetime_series_flexible(birthdate_raw)
+
     if "date_time" in df.columns:
-        parsed_date_time = pd.to_datetime(df["date_time"], format="%d-%m-%Y %H:%M:%S", errors="coerce")
-        fallback_mask = parsed_date_time.isna() & df["date_time"].notna()
-        if fallback_mask.any():
-            parsed_date_time.loc[fallback_mask] = pd.to_datetime(
-                df.loc[fallback_mask, "date_time"],
-                errors="coerce",
-                dayfirst=True,
-            )
-        df["date_time_parsed"] = parsed_date_time
+        df["date_time_parsed"] = parse_datetime_series_flexible(df["date_time"])
     else:
-        df["date_time_parsed"] = pd.NaT
+        df["date_time_parsed"] = pd.Series(pd.NaT, index=df.index)
+
+    df["Ano"] = build_year_series(df["Registration date"], df["date_time_parsed"], uploaded_file.name)
+    missing_years = int(df["Ano"].isna().sum())
+    if missing_years > 0:
+        pct_missing = missing_years / len(df) * 100 if len(df) else 0
+        st.warning(
+            f"Arquivo `{uploaded_file.name}` com {missing_years} registros sem ano inferido "
+            f"({pct_missing:.1f}%)."
+        )
+
     df["sale_hour"] = df["date_time_parsed"].dt.hour
     df["sale_period"] = pd.cut(
         df["sale_hour"],
@@ -589,10 +695,13 @@ def preprocess_uploaded_file(uploaded_file) -> pd.DataFrame:
     ).astype("object")
     df["sale_period"] = df["sale_period"].fillna("Sem horário")
 
-    df["edition_currency"] = df.get("Edition ID").apply(parse_currency_from_edition)
+    edition_col = pick_existing_column(df.columns, ["Edition ID"])
+    edition_series = safe_series(df, edition_col, default_value=pd.NA)
+    df["edition_currency"] = edition_series.apply(parse_currency_from_edition)
     if (df["edition_currency"] == "UNKNOWN").any():
-        unknown_ids = sorted(df.loc[df["edition_currency"] == "UNKNOWN", "Edition ID"].dropna().astype(str).unique())
-        st.warning(f"Edition ID sem mapeamento de moeda: {', '.join(unknown_ids)}")
+        if edition_col and edition_col in df.columns:
+            unknown_ids = sorted(df.loc[df["edition_currency"] == "UNKNOWN", edition_col].dropna().astype(str).unique())
+            st.warning(f"Edition ID sem mapeamento de moeda: {', '.join(unknown_ids)}")
 
     registered_status_col = pick_existing_column(df.columns, ["Registered status", "Status"])
     # KPI oficial: considerar inscrições ativas. Em algumas bases antigas, o status vem como COMPLETED.
@@ -604,12 +713,16 @@ def preprocess_uploaded_file(uploaded_file) -> pd.DataFrame:
             df["is_registered"] = status_series.apply(to_bool)
     else:
         df["is_registered"] = False
-    df["Competition"] = df.get("Competition").apply(standardize_competition)
+    competition_col = pick_existing_column(df.columns, ["Competition"])
+    df["Competition"] = safe_series(df, competition_col, default_value="").apply(standardize_competition)
     df = df[~df["Competition"].astype(str).str.contains("KIDS", case=False, na=False)].copy()
 
-    df["nationality_std"] = df.get("nationality").apply(standardize_nationality)
-    df["country_std"] = df.get("country").astype(str).str.strip().str.upper()
-    df["city_norm"] = df.get("city").astype(str).map(norm_text)
+    nationality_col = pick_existing_column(df.columns, ["nationality", "Nationality"])
+    country_col = pick_existing_column(df.columns, ["country", "Country"])
+    city_col = pick_existing_column(df.columns, ["city", "City"])
+    df["nationality_std"] = safe_series(df, nationality_col, default_value="").apply(standardize_nationality)
+    df["country_std"] = safe_series(df, country_col, default_value="").astype(str).str.strip().str.upper()
+    df["city_norm"] = safe_series(df, city_col, default_value="").astype(str).map(norm_text)
 
     if "yopp" in df.columns:
         df["yopp_flag"] = pd.to_numeric(df["yopp"], errors="coerce").fillna(0).astype(int).clip(0, 1)
@@ -834,7 +947,7 @@ def render_venn_unique_athletes(df_2026_all_rows: pd.DataFrame) -> None:
 def render_header(kpi_df: pd.DataFrame, data_base_label: str) -> None:
     total = len(kpi_df)
     unique_emails = len(extract_unique_emails(kpi_df))
-    female = kpi_df["gender"].astype(str).str.upper().isin(["F", "FEMALE"]).sum() if "gender" in kpi_df.columns else 0
+    female = count_female_entries(kpi_df)
     pct_female = (female / total * 100) if total else 0
     foreigners = kpi_df[kpi_df["nationality_std"] != "BR"].shape[0] if "nationality_std" in kpi_df.columns else 0
     pct_foreigners = (foreigners / total * 100) if total else 0
@@ -886,7 +999,7 @@ def render_header(kpi_df: pd.DataFrame, data_base_label: str) -> None:
 
 def render_header_marketing(kpi_df: pd.DataFrame, data_base_label: str) -> None:
     total = len(kpi_df)
-    female = kpi_df["gender"].astype(str).str.upper().isin(["F", "FEMALE"]).sum() if "gender" in kpi_df.columns else 0
+    female = count_female_entries(kpi_df)
     pct_female = (female / total * 100) if total else 0
     foreigners = kpi_df[kpi_df["nationality_std"] != "BR"].shape[0] if "nationality_std" in kpi_df.columns else 0
     pct_foreigners = (foreigners / total * 100) if total else 0
@@ -967,8 +1080,7 @@ def render_header_financial(kpi_df: pd.DataFrame, data_base_label: str) -> None:
 
 def build_route_summary(df: pd.DataFrame, targets: dict[str, int]) -> pd.DataFrame:
     local = df.copy()
-    if "gender" not in local.columns:
-        local["gender"] = ""
+    local["_female_flag"] = female_mask_from_series(get_gender_series(local)).astype(int)
     grouped = (
         local.groupby("Competition", dropna=False)
         .agg(
@@ -976,7 +1088,7 @@ def build_route_summary(df: pd.DataFrame, targets: dict[str, int]) -> pd.DataFra
             receita_bruta=("total_registration_brl", "sum"),
             descontos=("total_discounts_brl", "sum"),
             receita_liquida=("net_revenue_brl", "sum"),
-            mulheres=("gender", lambda s: s.astype(str).str.upper().isin(["F", "FEMALE"]).sum()),
+            mulheres=("_female_flag", "sum"),
         )
         .reset_index()
         .rename(columns={"Competition": "Percurso"})
@@ -1253,13 +1365,14 @@ def render_demography(df: pd.DataFrame, expandido: bool = False) -> None:
         return
 
     st.subheader("Gênero")
-    if "gender" not in df.columns:
+    gender_col = find_column_by_candidates(df.columns, AI_GENDER_CANDIDATES)
+    if not gender_col:
         st.info("Coluna de gênero não disponível para análise.")
     else:
-        gender_raw = df["gender"].astype(str).str.strip().str.upper()
+        gender_raw = df[gender_col].astype(str).str.strip().str.lower()
         gender_norm = pd.Series("Outros/NA", index=df.index, dtype="object")
-        gender_norm.loc[gender_raw.isin(["F", "FEMALE"])] = "Feminino"
-        gender_norm.loc[gender_raw.isin(["M", "MALE"])] = "Masculino"
+        gender_norm.loc[gender_raw.isin(AI_FEMALE_TOKENS)] = "Feminino"
+        gender_norm.loc[gender_raw.isin(AI_MALE_TOKENS)] = "Masculino"
         gender_counts = gender_norm.value_counts().rename_axis("Gênero").reset_index(name="Inscritos")
         total_gender = gender_counts["Inscritos"].sum()
         gender_counts["%"] = gender_counts["Inscritos"].apply(
@@ -1545,9 +1658,8 @@ def render_perfil_inscrito(df: pd.DataFrame) -> None:
     bus_br = int(br_mask.sum())
     bus_foreign = int((~br_mask).sum()) if "nationality_std" in interested.columns else 0
 
-    gender_raw = interested["gender"].astype(str).str.strip().str.upper() if "gender" in interested.columns else pd.Series(dtype="object")
-    female_bus = int(gender_raw.isin(["F", "FEMALE"]).sum()) if not gender_raw.empty else 0
-    male_bus = int(gender_raw.isin(["M", "MALE"]).sum()) if not gender_raw.empty else 0
+    female_bus = count_female_entries(interested)
+    male_bus = count_male_entries(interested)
 
     c1, c2, c3, c4, c5 = st.columns(5)
     c1.metric("Interessados", format_int(bus_total))
@@ -1619,9 +1731,8 @@ def render_yopp_section(df: pd.DataFrame, ibge_df: pd.DataFrame) -> None:
     yopp_total = len(yopp_buyers)
     pct_yopp = (yopp_total / total * 100) if total else 0
 
-    gender_raw = yopp_buyers["gender"].astype(str).str.strip().str.upper() if "gender" in yopp_buyers.columns else pd.Series(dtype="object")
-    female_yopp = int(gender_raw.isin(["F", "FEMALE"]).sum()) if not gender_raw.empty else 0
-    male_yopp = int(gender_raw.isin(["M", "MALE"]).sum()) if not gender_raw.empty else 0
+    female_yopp = count_female_entries(yopp_buyers)
+    male_yopp = count_male_entries(yopp_buyers)
 
     br_mask = yopp_buyers["nationality_std"].eq("BR") if "nationality_std" in yopp_buyers.columns else pd.Series(False, index=yopp_buyers.index)
     br_yopp = int(br_mask.sum())
@@ -1698,9 +1809,8 @@ def render_nubank_section(df: pd.DataFrame, ibge_df: pd.DataFrame) -> None:
     total_br_full = len(br_full)
     nubank_pct = (nubank_total / total_br_full * 100) if total_br_full else 0
 
-    gender_raw = nubank_buyers["gender"].astype(str).str.strip().str.upper() if "gender" in nubank_buyers.columns else pd.Series(dtype="object")
-    female_nubank = int(gender_raw.isin(["F", "FEMALE"]).sum()) if not gender_raw.empty else 0
-    male_nubank = int(gender_raw.isin(["M", "MALE"]).sum()) if not gender_raw.empty else 0
+    female_nubank = count_female_entries(nubank_buyers)
+    male_nubank = count_male_entries(nubank_buyers)
     other_nubank = max(nubank_total - female_nubank - male_nubank, 0)
 
     valid_age = nubank_buyers["age"].dropna() if "age" in nubank_buyers.columns else pd.Series(dtype="float64")
@@ -2177,17 +2287,6 @@ def to_context_columns(columns: list[str], limit: int = 40) -> list[str]:
     return columns[:limit] + [f"... (+{len(columns) - limit} colunas)"]
 
 
-def dataframe_sample_for_context(df: pd.DataFrame, max_rows: int = 5, max_cols: int = 12) -> list[dict[str, Any]]:
-    if df.empty:
-        return []
-    sample_cols = df.columns[:max_cols]
-    sampled = df.loc[:, sample_cols].head(max_rows).copy()
-    for col in sampled.columns:
-        if pd.api.types.is_datetime64_any_dtype(sampled[col]):
-            sampled[col] = sampled[col].astype(str)
-    return sampled.to_dict(orient="records")
-
-
 def build_session_data_context(
     full_df: pd.DataFrame | None,
     filtered_df: pd.DataFrame | None,
@@ -2201,7 +2300,7 @@ def build_session_data_context(
             "rows": int(len(full_df)),
             "columns": to_context_columns(full_df.columns.astype(str).tolist()),
             "years": full_years,
-            "sample": dataframe_sample_for_context(full_df),
+            "missing_year_rows": int(full_df["Ano"].isna().sum()) if "Ano" in full_df.columns else 0,
         }
         context["available"].append("inscricoes_upload")
 
@@ -2216,11 +2315,11 @@ def build_session_data_context(
             "columns": to_context_columns(filtered_df.columns.astype(str).tolist()),
             "total_net_revenue_brl": float(filtered_df["net_revenue_brl"].sum()) if "net_revenue_brl" in filtered_df.columns else 0.0,
             "inscritos_por_ano": filtered_yearly.to_dict(orient="records"),
-            "sample": dataframe_sample_for_context(filtered_df),
         }
         context["available"].append("inscricoes_confirmadas")
 
     if mp_df is not None:
+        mp_approved = get_mp_approved_scope(mp_df)
         status_counts = (
             mp_df["Estado"].fillna("Sem estado").astype(str).value_counts().rename_axis("estado").reset_index(name="qtd")
             if "Estado" in mp_df.columns
@@ -2229,9 +2328,11 @@ def build_session_data_context(
         context["datasets"]["mercado_pago"] = {
             "rows": int(len(mp_df)),
             "columns": to_context_columns(mp_df.columns.astype(str).tolist()),
-            "total_liquido_brl": float(mp_df["Total a receber_num"].sum()) if "Total a receber_num" in mp_df.columns else 0.0,
+            "rows_aprovado": int(len(mp_approved)),
+            "total_liquido_brl_aprovado": (
+                float(mp_approved["Total a receber_num"].sum()) if "Total a receber_num" in mp_approved.columns else 0.0
+            ),
             "status_counts": status_counts.to_dict(orient="records"),
-            "sample": dataframe_sample_for_context(mp_df),
         }
         context["available"].append("mercado_pago")
 
@@ -2244,14 +2345,37 @@ def detect_gender_column(df: pd.DataFrame | None) -> str | None:
     return find_column_by_candidates(df.columns, AI_GENDER_CANDIDATES)
 
 
+def extract_years_from_question(question: str) -> list[int]:
+    years = [int(year) for year in re.findall(r"\b(20\d{2})\b", question)]
+    return [year for year in years if MIN_VALID_YEAR <= year <= MAX_VALID_YEAR]
+
+
+def filter_df_by_years(df: pd.DataFrame, years: list[int]) -> pd.DataFrame:
+    if not years or "Ano" not in df.columns:
+        return df.copy()
+    return df[df["Ano"].isin(years)].copy()
+
+
+def is_mercado_pago_question(question: str) -> bool:
+    lower_question = str(question).lower()
+    if re.search(r"\bmercado\s*pago\b", lower_question):
+        return True
+    return bool(re.search(r"\bmp\b", lower_question))
+
+
 def deterministic_query_answer(question: str, filtered_df: pd.DataFrame | None, mp_df: pd.DataFrame | None) -> dict[str, Any] | None:
     question_norm = norm_text(question)
-    question_compact = question_norm.replace(" ", "")
-    years_in_question = [int(year) for year in re.findall(r"\b(20\d{2})\b", question)]
+    years_in_question = extract_years_from_question(question)
 
-    if filtered_df is not None and ("inscrit" in question_norm or "inscricao" in question_norm):
-        if any(token in question_norm for token in ["mulher", "femin", "female"]):
-            gender_col = detect_gender_column(filtered_df)
+    if filtered_df is not None:
+        local = filter_df_by_years(filtered_df, years_in_question)
+        has_inscricoes_terms = any(token in question_norm for token in ["inscrit", "inscricao", "atleta", "confirmad"])
+        has_total_terms = any(token in question_norm for token in ["quantos", "qtd", "total", "numero"])
+        has_female_terms = any(token in question_norm for token in ["mulher", "femin", "female"])
+        has_revenue_terms = any(token in question_norm for token in ["receita", "faturamento", "bruto", "liquido", "desconto"])
+
+        if has_inscricoes_terms and has_female_terms:
+            gender_col = detect_gender_column(local)
             if not gender_col:
                 return {
                     "type": "limitation",
@@ -2262,14 +2386,7 @@ def deterministic_query_answer(question: str, filtered_df: pd.DataFrame | None, 
                     "data": {"required_column": "gender|sexo|gênero"},
                 }
 
-            local = filtered_df.copy()
-            gender_series = local[gender_col].fillna("").astype(str).str.strip().str.lower()
-            female_mask = gender_series.isin(AI_FEMALE_TOKENS)
-            female_df = local.loc[female_mask].copy()
-
-            if years_in_question and "Ano" in female_df.columns:
-                female_df = female_df[female_df["Ano"].isin(years_in_question)].copy()
-
+            female_df = local.loc[female_mask_from_series(local[gender_col])].copy()
             by_year = (
                 female_df.groupby("Ano").size().rename("mulheres_inscritas").reset_index().sort_values("Ano")
                 if "Ano" in female_df.columns
@@ -2288,10 +2405,7 @@ def deterministic_query_answer(question: str, filtered_df: pd.DataFrame | None, 
                 },
             }
 
-        if any(token in question_norm for token in ["quantos", "qtd", "total"]):
-            local = filtered_df.copy()
-            if years_in_question and "Ano" in local.columns:
-                local = local[local["Ano"].isin(years_in_question)].copy()
+        if has_inscricoes_terms and has_total_terms:
             total = int(len(local))
             by_year = (
                 local.groupby("Ano").size().rename("inscritos").reset_index().sort_values("Ano")
@@ -2304,19 +2418,48 @@ def deterministic_query_answer(question: str, filtered_df: pd.DataFrame | None, 
                 "data": {"total_inscritos": total, "por_ano": by_year.to_dict(orient="records")},
             }
 
-    if mp_df is not None and ("mercadopago" in question_compact or "mp" in question_compact):
-        if any(token in question_norm for token in ["liquido", "total", "receb"]):
-            total_liquido = float(mp_df["Total a receber_num"].sum()) if "Total a receber_num" in mp_df.columns else 0.0
-            total_bruto = float(mp_df["Recebimento_num"].sum()) if "Recebimento_num" in mp_df.columns else 0.0
-            total_taxa = abs(float(mp_df["Tarifas e impostos_num"].sum())) if "Tarifas e impostos_num" in mp_df.columns else 0.0
+        if has_revenue_terms:
+            gross = float(local["total_registration_brl"].sum()) if "total_registration_brl" in local.columns else 0.0
+            discounts = float(local["total_discounts_brl"].sum()) if "total_discounts_brl" in local.columns else 0.0
+            net = float(local["net_revenue_brl"].sum()) if "net_revenue_brl" in local.columns else 0.0
+            gross_brl, gross_usd_brl, _ = revenue_split_by_currency(local, "total_registration_brl")
+            return {
+                "type": "inscricoes_financial_totals",
+                "answer_text": (
+                    f"Receita de inscrições na sessão: líquido {format_currency(net)}, "
+                    f"bruto {format_currency(gross)}, descontos {format_currency(discounts)}."
+                ),
+                "data": {
+                    "receita_liquida_brl": net,
+                    "receita_bruta_brl": gross,
+                    "descontos_brl": discounts,
+                    "receita_bruta_brl_moeda_brl": gross_brl,
+                    "receita_bruta_brl_convertida_de_usd": gross_usd_brl,
+                },
+            }
+
+    if mp_df is not None and is_mercado_pago_question(question):
+        has_financial_terms = any(token in question_norm for token in ["liquido", "total", "receb", "taxa", "bruto"])
+        if has_financial_terms:
+            approved_scope = get_mp_approved_scope(mp_df)
+            total_liquido = (
+                float(approved_scope["Total a receber_num"].sum()) if "Total a receber_num" in approved_scope.columns else 0.0
+            )
+            total_bruto = float(approved_scope["Recebimento_num"].sum()) if "Recebimento_num" in approved_scope.columns else 0.0
+            total_taxa = (
+                abs(float(approved_scope["Tarifas e impostos_num"].sum()))
+                if "Tarifas e impostos_num" in approved_scope.columns
+                else 0.0
+            )
             taxa_media = (total_taxa / total_bruto * 100) if total_bruto else 0.0
             return {
                 "type": "mercado_pago_totals",
                 "answer_text": (
-                    f"Mercado Pago na sessão: líquido {format_currency(total_liquido)}, "
+                    f"Mercado Pago (somente status Aprovado): líquido {format_currency(total_liquido)}, "
                     f"bruto {format_currency(total_bruto)}, taxa média {format_pct(taxa_media)}."
                 ),
                 "data": {
+                    "escopo_estado": "Aprovado",
                     "total_liquido_brl": total_liquido,
                     "total_bruto_brl": total_bruto,
                     "taxa_media_pct": taxa_media,
@@ -2341,6 +2484,20 @@ def build_ai_system_prompt() -> str:
         "Quando faltar coluna/dado, explique claramente a limitação e sugira o campo necessário. "
         "Para perguntas quantitativas com resultado determinístico recebido, preserve exatamente os números."
     )
+
+
+def build_context_signature(context_payload: dict[str, Any]) -> str:
+    return json.dumps(context_payload, ensure_ascii=False, sort_keys=True, default=str)
+
+
+def get_dynamic_quick_questions(context_payload: dict[str, Any]) -> list[str]:
+    available = set(context_payload.get("available", []))
+    prompts: list[str] = []
+    if {"inscricoes_upload", "inscricoes_confirmadas"} & available:
+        prompts.extend(AI_QUICK_QUESTIONS_INSCRICOES)
+    if "mercado_pago" in available:
+        prompts.extend(AI_QUICK_QUESTIONS_MP)
+    return prompts
 
 
 def call_openai_for_dashboard_chat(
@@ -2421,6 +2578,20 @@ def render_dashboard_ia(
     context_payload = build_session_data_context(full_df, filtered_df, mp_df)
     datasets_label = ", ".join(context_payload.get("available", [])) if context_payload.get("available") else "nenhum"
     st.caption(f"Contexto disponível na sessão: {datasets_label}")
+    st.caption("Privacidade: a IA recebe apenas agregados e metadados (não envia amostras brutas por padrão).")
+
+    context_signature = build_context_signature(context_payload)
+    previous_signature = st.session_state.get("ia_context_signature")
+    if previous_signature is None:
+        st.session_state["ia_context_signature"] = context_signature
+    elif previous_signature != context_signature:
+        st.session_state["ia_chat_messages"] = [
+            {
+                "role": "assistant",
+                "content": "Base atualizada. Reiniciei a conversa para evitar respostas com contexto antigo.",
+            }
+        ]
+        st.session_state["ia_context_signature"] = context_signature
 
     if "ia_chat_messages" not in st.session_state:
         st.session_state["ia_chat_messages"] = [
@@ -2430,9 +2601,10 @@ def render_dashboard_ia(
             }
         ]
 
+    quick_questions = get_dynamic_quick_questions(context_payload)
     quick_cols = st.columns(2)
     selected_quick_prompt = None
-    for idx, question in enumerate(AI_QUICK_QUESTIONS):
+    for idx, question in enumerate(quick_questions):
         target_col = quick_cols[idx % 2]
         with target_col:
             if st.button(question, key=f"quick_ai_{idx}", use_container_width=True):
@@ -2466,7 +2638,7 @@ def render_dashboard_ia(
 
     deterministic_result = deterministic_query_answer(user_prompt, filtered_df, mp_df)
     history = st.session_state["ia_chat_messages"][:-1]
-    if deterministic_result is not None and not get_openai_api_key():
+    if deterministic_result is not None:
         assistant_text = deterministic_result.get("answer_text", "Não consegui calcular esta pergunta.")
     else:
         assistant_text = call_openai_for_dashboard_chat(
@@ -2547,9 +2719,7 @@ def render_dashboard_mercado_pago(df_mp: pd.DataFrame, source_name: str) -> None
         st.info("Sem registros para os filtros selecionados.")
         return
 
-    approved_scope = scoped_base.copy()
-    if "Estado" in approved_scope.columns:
-        approved_scope = approved_scope[approved_scope["Estado"].astype(str).eq("Aprovado")].copy()
+    approved_scope = get_mp_approved_scope(scoped_base)
 
     if approved_scope.empty:
         st.info("Sem vendas com status Aprovado para o período/filtros selecionados.")
