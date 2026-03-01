@@ -2364,6 +2364,18 @@ def is_mercado_pago_question(question: str) -> bool:
     return bool(re.search(r"\bmp\b", lower_question))
 
 
+def is_year_inventory_question(question_norm: str) -> bool:
+    # norm_text compacta espaços; aqui usamos marcadores sem whitespace.
+    markers = [
+        "quantosanos",
+        "quaisanos",
+        "anosdeevento",
+        "anosexistem",
+        "anosdisponiveis",
+    ]
+    return any(marker in question_norm for marker in markers)
+
+
 def deterministic_query_answer(question: str, filtered_df: pd.DataFrame | None, mp_df: pd.DataFrame | None) -> dict[str, Any] | None:
     question_norm = norm_text(question)
     years_in_question = extract_years_from_question(question)
@@ -2375,31 +2387,13 @@ def deterministic_query_answer(question: str, filtered_df: pd.DataFrame | None, 
         has_female_terms = any(token in question_norm for token in ["mulher", "femin", "female"])
         has_revenue_terms = any(token in question_norm for token in ["receita", "faturamento", "bruto", "liquido", "desconto"])
         has_year_terms = any(token in question_norm for token in ["ano", "anos", "edicao", "edicoes", "evento", "historico"])
-
-        if has_year_terms and "Ano" in local.columns:
-            years_series = pd.to_numeric(local["Ano"], errors="coerce").dropna().astype(int)
-            years_available = sorted({year for year in years_series.tolist() if MIN_VALID_YEAR <= year <= MAX_VALID_YEAR})
-            if years_available:
-                years_label = ", ".join(str(year) for year in years_available)
-                return {
-                    "type": "available_years",
-                    "answer_text": (
-                        f"Identifiquei {format_int(len(years_available))} anos de evento na sessão: {years_label}."
-                    ),
-                    "data": {
-                        "total_anos_evento": len(years_available),
-                        "anos_disponiveis": years_available,
-                        "intervalo": {
-                            "min": min(years_available),
-                            "max": max(years_available),
-                        },
-                    },
-                }
-            return {
-                "type": "limitation",
-                "answer_text": "Não consegui identificar anos válidos na coluna `Ano` para responder essa pergunta.",
-                "data": {"required_column": "Ano"},
-            }
+        has_year_inventory_intent = (
+            has_year_terms
+            and is_year_inventory_question(question_norm)
+            and not has_inscricoes_terms
+            and not has_female_terms
+            and not has_revenue_terms
+        )
 
         if has_inscricoes_terms and has_female_terms:
             gender_col = detect_gender_column(local)
@@ -2463,6 +2457,31 @@ def deterministic_query_answer(question: str, filtered_df: pd.DataFrame | None, 
                     "receita_bruta_brl_moeda_brl": gross_brl,
                     "receita_bruta_brl_convertida_de_usd": gross_usd_brl,
                 },
+            }
+
+        if has_year_inventory_intent and "Ano" in local.columns:
+            years_series = pd.to_numeric(local["Ano"], errors="coerce").dropna().astype(int)
+            years_available = sorted({year for year in years_series.tolist() if MIN_VALID_YEAR <= year <= MAX_VALID_YEAR})
+            if years_available:
+                years_label = ", ".join(str(year) for year in years_available)
+                return {
+                    "type": "available_years",
+                    "answer_text": (
+                        f"Identifiquei {format_int(len(years_available))} anos de evento na sessão: {years_label}."
+                    ),
+                    "data": {
+                        "total_anos_evento": len(years_available),
+                        "anos_disponiveis": years_available,
+                        "intervalo": {
+                            "min": min(years_available),
+                            "max": max(years_available),
+                        },
+                    },
+                }
+            return {
+                "type": "limitation",
+                "answer_text": "Não consegui identificar anos válidos na coluna `Ano` para responder essa pergunta.",
+                "data": {"required_column": "Ano"},
             }
 
     if mp_df is not None and is_mercado_pago_question(question):
