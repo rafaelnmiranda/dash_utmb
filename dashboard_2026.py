@@ -63,6 +63,7 @@ REQUIRED_COLUMNS = [
 AI_QUICK_QUESTIONS_INSCRICOES = [
     "Quantas mulheres estão inscritas nos 4 anos de evento?",
     "Quantos inscritos existem por ano?",
+    "Quantos anos de evento existem na sessão atual?",
     "Qual a receita líquida total em BRL na sessão atual?",
 ]
 AI_QUICK_QUESTIONS_MP = [
@@ -2373,6 +2374,32 @@ def deterministic_query_answer(question: str, filtered_df: pd.DataFrame | None, 
         has_total_terms = any(token in question_norm for token in ["quantos", "qtd", "total", "numero"])
         has_female_terms = any(token in question_norm for token in ["mulher", "femin", "female"])
         has_revenue_terms = any(token in question_norm for token in ["receita", "faturamento", "bruto", "liquido", "desconto"])
+        has_year_terms = any(token in question_norm for token in ["ano", "anos", "edicao", "edicoes", "evento", "historico"])
+
+        if has_year_terms and "Ano" in local.columns:
+            years_series = pd.to_numeric(local["Ano"], errors="coerce").dropna().astype(int)
+            years_available = sorted({year for year in years_series.tolist() if MIN_VALID_YEAR <= year <= MAX_VALID_YEAR})
+            if years_available:
+                years_label = ", ".join(str(year) for year in years_available)
+                return {
+                    "type": "available_years",
+                    "answer_text": (
+                        f"Identifiquei {format_int(len(years_available))} anos de evento na sessão: {years_label}."
+                    ),
+                    "data": {
+                        "total_anos_evento": len(years_available),
+                        "anos_disponiveis": years_available,
+                        "intervalo": {
+                            "min": min(years_available),
+                            "max": max(years_available),
+                        },
+                    },
+                }
+            return {
+                "type": "limitation",
+                "answer_text": "Não consegui identificar anos válidos na coluna `Ano` para responder essa pergunta.",
+                "data": {"required_column": "Ano"},
+            }
 
         if has_inscricoes_terms and has_female_terms:
             gender_col = detect_gender_column(local)
@@ -2474,6 +2501,43 @@ def get_openai_api_key() -> str | None:
     if not api_key:
         return None
     return str(api_key)
+
+
+def get_openai_connection_status(force_refresh: bool = False) -> dict[str, Any]:
+    cache_key = "openai_connection_status"
+    now_ts = datetime.now().timestamp()
+    cached = st.session_state.get(cache_key)
+    ttl_seconds = 180
+    if not force_refresh and isinstance(cached, dict):
+        cached_ts = float(cached.get("checked_at", 0))
+        if (now_ts - cached_ts) <= ttl_seconds:
+            return cached
+
+    model = str(st.secrets.get("OPENAI_MODEL", "gpt-4o-mini"))
+    status: dict[str, Any] = {
+        "ok": False,
+        "message": "Conexão OpenAI ainda não validada.",
+        "model": model,
+        "checked_at": now_ts,
+    }
+
+    if OpenAI is None:
+        status["message"] = "Biblioteca `openai` não está instalada no ambiente."
+    else:
+        api_key = get_openai_api_key()
+        if not api_key:
+            status["message"] = "OPENAI_API_KEY ausente em `.streamlit/secrets.toml`."
+        else:
+            try:
+                client = OpenAI(api_key=api_key)
+                client.models.retrieve(model)
+                status["ok"] = True
+                status["message"] = f"Conectado com sucesso ao modelo `{model}`."
+            except Exception as exc:  # noqa: BLE001
+                status["message"] = f"Falha ao validar OpenAI: {exc}"
+
+    st.session_state[cache_key] = status
+    return status
 
 
 def build_ai_system_prompt() -> str:
@@ -2579,6 +2643,15 @@ def render_dashboard_ia(
     datasets_label = ", ".join(context_payload.get("available", [])) if context_payload.get("available") else "nenhum"
     st.caption(f"Contexto disponível na sessão: {datasets_label}")
     st.caption("Privacidade: a IA recebe apenas agregados e metadados (não envia amostras brutas por padrão).")
+    openai_status_col_1, openai_status_col_2 = st.columns([5, 1])
+    with openai_status_col_2:
+        refresh_openai_status = st.button("Revalidar OpenAI", use_container_width=True)
+    openai_status = get_openai_connection_status(force_refresh=refresh_openai_status)
+    with openai_status_col_1:
+        if openai_status.get("ok"):
+            st.success(f"Farol OpenAI: {openai_status.get('message')}")
+        else:
+            st.error(f"Farol OpenAI: {openai_status.get('message')}")
 
     context_signature = build_context_signature(context_payload)
     previous_signature = st.session_state.get("ia_context_signature")
