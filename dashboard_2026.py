@@ -1,5 +1,6 @@
 import json
 import re
+import subprocess
 import unicodedata
 import difflib
 from datetime import date, datetime
@@ -648,6 +649,30 @@ def load_ibge() -> pd.DataFrame:
     ibge = pd.read_excel(BytesIO(resp.content), engine="openpyxl")
     ibge["City_norm"] = ibge["City"].astype(str).map(norm_text)
     return ibge.drop_duplicates(subset=["City_norm"], keep="first")
+
+
+@st.cache_data(show_spinner=False)
+def get_app_version_stamp() -> str:
+    try:
+        output = subprocess.check_output(
+            [
+                "git",
+                "log",
+                "-1",
+                "--format=%h|%cd",
+                "--date=format:%Y-%m-%d %H:%M:%S",
+            ],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+        if output and "|" in output:
+            commit_hash, commit_dt = output.split("|", maxsplit=1)
+            return f"{commit_hash} | {commit_dt}"
+    except Exception:  # noqa: BLE001
+        pass
+
+    fallback_ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    return f"sem-git | {fallback_ts}"
 
 
 def validate_columns(df: pd.DataFrame, source_name: str) -> list[str]:
@@ -3440,6 +3465,7 @@ def main() -> None:
     apply_print_css()
     st.sidebar.title("Configurações 2026")
     st.sidebar.caption("Dashboard único em Streamlit com upload manual BRL/USD.")
+    st.sidebar.caption(f"Versão: {get_app_version_stamp()}")
 
     uploaded_files = st.sidebar.file_uploader(
         "Envie os arquivos 2026 (BR_FULL / US_FULL)",
