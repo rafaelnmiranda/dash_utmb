@@ -203,6 +203,13 @@ def format_currency(value: float) -> str:
     return f"R$ {float(value):,.0f}".replace(",", ".")
 
 
+def format_currency_brl_2(value: float) -> str:
+    if pd.isna(value):
+        value = 0.0
+    formatted = f"{float(value):,.2f}"
+    return f"R$ {formatted.replace(',', 'X').replace('.', ',').replace('X', '.')}"
+
+
 def format_int(value: float) -> str:
     if pd.isna(value):
         return "0"
@@ -2324,6 +2331,14 @@ def load_mercado_pago_file(uploaded_file) -> pd.DataFrame:
     return df
 
 
+@st.cache_data(show_spinner=False)
+def load_njuko_file(uploaded_file) -> pd.DataFrame:
+    df = pd.read_excel(uploaded_file, sheet_name=0)
+    df = normalize_headers(df)
+    df = df.dropna(how="all").copy()
+    return df
+
+
 def to_context_columns(columns: list[str], limit: int = 40) -> list[str]:
     if len(columns) <= limit:
         return columns
@@ -3501,6 +3516,162 @@ def render_dashboard_mercado_pago(df_mp: pd.DataFrame, source_name: str) -> None
     )
 
 
+def render_dashboard_analise_limbo(
+    df_mp: pd.DataFrame,
+    df_njuko: pd.DataFrame,
+    mp_source_name: str,
+    njuko_source_name: str,
+) -> dict[str, Any]:
+    st.title("🔴 Análise Limbo")
+    st.caption(
+        "Cross-check entre Mercado Pago e Njuko para encontrar atletas com pagamento aprovado sem correspondência na plataforma."
+    )
+    st.caption(f"Fontes: MP `{mp_source_name}` | Njuko `{njuko_source_name}`")
+
+    required_mp_cols = {"Número da transação", "Estado", "Descrição do item"}
+    required_njuko_cols = {"Gateway reference"}
+    missing_mp = sorted(required_mp_cols - set(df_mp.columns))
+    missing_njuko = sorted(required_njuko_cols - set(df_njuko.columns))
+    if missing_mp:
+        st.error(f"Arquivo Mercado Pago sem colunas obrigatórias: {', '.join(missing_mp)}")
+        return {"ok": False, "total_aprovado": 0, "total_limbo": 0, "valor_risco": 0.0}
+    if missing_njuko:
+        st.error(f"Arquivo Njuko sem colunas obrigatórias: {', '.join(missing_njuko)}")
+        return {"ok": False, "total_aprovado": 0, "total_limbo": 0, "valor_risco": 0.0}
+
+    with st.spinner("Processando cross-check..."):
+        mp_aprovado = df_mp[df_mp["Estado"].astype(str).str.strip().eq("Aprovado")].copy()
+        transacao_raw = mp_aprovado["Número da transação"].fillna("").astype(str).str.strip()
+        transacao_num = pd.to_numeric(transacao_raw.str.replace(r"\.0+$", "", regex=True), errors="coerce")
+        transacao_norm = transacao_raw.where(transacao_num.isna(), transacao_num.astype("Int64").astype(str))
+        mp_aprovado["Número da transação"] = transacao_norm
+        mp_aprovado = mp_aprovado[mp_aprovado["Número da transação"] != ""].copy()
+
+        if "Recebimento" in mp_aprovado.columns:
+            mp_aprovado["Recebimento_num"] = parse_brl_currency_series(mp_aprovado["Recebimento"])
+        elif "Recebimento_num" not in mp_aprovado.columns:
+            mp_aprovado["Recebimento_num"] = 0.0
+
+        njuko_refs = (
+            df_njuko["Gateway reference"]
+            .dropna()
+            .astype(str)
+            .str.strip()
+        )
+        njuko_refs = njuko_refs[njuko_refs != ""]
+        njuko_ref_set = set(njuko_refs.tolist())
+
+        mp_encontrado = mp_aprovado[mp_aprovado["Número da transação"].isin(njuko_ref_set)].copy()
+        mp_limbo = mp_aprovado[~mp_aprovado["Número da transação"].isin(njuko_ref_set)].copy()
+
+        item_desc_limbo = (
+            mp_limbo["Descrição do item"].fillna("").astype(str)
+            if "Descrição do item" in mp_limbo.columns
+            else pd.Series("", index=mp_limbo.index, dtype="object")
+        )
+        mp_limbo["Prova"] = item_desc_limbo.str.extract(r"FR\d+ : (.+?) \(", expand=False).fillna("Não identificada")
+        mp_limbo["ID Njuko"] = item_desc_limbo.str.extract(r"\(([a-fA-F0-9]+)\)", expand=False).fillna("")
+
+        matched_njuko = df_njuko.copy()
+        matched_njuko["Gateway reference"] = matched_njuko["Gateway reference"].fillna("").astype(str).str.strip()
+        matched_njuko = matched_njuko[
+            matched_njuko["Gateway reference"].isin(mp_encontrado["Número da transação"])
+        ].copy()
+        if "Status" in matched_njuko.columns:
+            status_upper = matched_njuko["Status"].fillna("").astype(str).str.strip().str.upper()
+            paid_refs = set(matched_njuko.loc[status_upper.eq("PAID"), "Gateway reference"].tolist())
+            waiting_refs = set(matched_njuko.loc[status_upper.eq("WAITING"), "Gateway reference"].tolist())
+        else:
+            paid_refs = set()
+            waiting_refs = set()
+
+        total_aprovado = int(len(mp_aprovado))
+        total_encontrados = int(len(mp_encontrado))
+        total_limbo = int(len(mp_limbo))
+        encontrados_paid = int(mp_encontrado["Número da transação"].isin(paid_refs).sum())
+        encontrados_waiting = int(mp_encontrado["Número da transação"].isin(waiting_refs).sum())
+        valor_risco = float(mp_limbo["Recebimento_num"].sum())
+
+    prev_limbo = st.session_state.get("limbo_prev_count")
+    delta_limbo = None if prev_limbo is None else f"{int(total_limbo - int(prev_limbo)):+d} vs última execução"
+    st.session_state["limbo_prev_count"] = total_limbo
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Total MP Aprovado", format_int(total_aprovado))
+    c2.metric(
+        "Encontrados na Njuko",
+        format_int(total_encontrados),
+        delta=f"PAID: {format_int(encontrados_paid)} | WAITING: {format_int(encontrados_waiting)}",
+    )
+    c3.metric("Atletas no Limbo", format_int(total_limbo), delta=delta_limbo)
+    c4.metric("Valor total em risco", format_currency_brl_2(valor_risco))
+
+    st.subheader("Distribuição por prova")
+    if mp_limbo.empty:
+        st.info("Nenhum atleta no limbo para o cruzamento atual.")
+    else:
+        dist = (
+            mp_limbo.groupby("Prova", dropna=False)
+            .agg(
+                **{
+                    "Qtd atletas no limbo": ("Prova", "size"),
+                    "Valor total recebido (R$)": ("Recebimento_num", "sum"),
+                }
+            )
+            .reset_index()
+            .sort_values("Qtd atletas no limbo", ascending=False)
+        )
+        total_limbo_base = float(total_limbo) if total_limbo else 1.0
+        dist["% do total limbo"] = dist["Qtd atletas no limbo"] / total_limbo_base * 100
+        dist_display = dist.copy()
+        dist_display["% do total limbo"] = dist_display["% do total limbo"].map(
+            lambda x: f"{x:.2f}%".replace(".", ",")
+        )
+        dist_display["Valor total recebido (R$)"] = dist_display["Valor total recebido (R$)"].map(format_currency_brl_2)
+        st.dataframe(dist_display, hide_index=True, use_container_width=True)
+
+    detail_cols = [
+        "Número da transação",
+        "Data da transação",
+        "Prova",
+        "Descrição do item",
+        "Recebimento",
+        "Meio de pagamento",
+        "Referência externa",
+        "ID Njuko",
+    ]
+    detail_df = mp_limbo.copy()
+    for col in detail_cols:
+        if col not in detail_df.columns:
+            detail_df[col] = ""
+    detail_df["Recebimento"] = detail_df["Recebimento_num"].map(format_currency_brl_2)
+    detail_view = detail_df[detail_cols].copy()
+
+    with st.expander(f"Tabela detalhada dos atletas no limbo ({format_int(total_limbo)} registros)"):
+        st.dataframe(detail_view, hide_index=True, use_container_width=True)
+
+    excel_buffer = BytesIO()
+    with pd.ExcelWriter(excel_buffer, engine="openpyxl") as writer:
+        detail_view.to_excel(writer, index=False, sheet_name="Atletas no limbo")
+    st.download_button(
+        "Baixar atletas no limbo (.xlsx)",
+        data=excel_buffer.getvalue(),
+        file_name="analise_limbo_atletas.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        use_container_width=True,
+    )
+
+    return {
+        "ok": True,
+        "total_aprovado": total_aprovado,
+        "total_encontrados": total_encontrados,
+        "encontrados_paid": encontrados_paid,
+        "encontrados_waiting": encontrados_waiting,
+        "total_limbo": total_limbo,
+        "valor_risco": valor_risco,
+    }
+
+
 def render_exports(raw_df: pd.DataFrame, kpi_df: pd.DataFrame) -> None:
     st.header("Exportações")
     export_df = kpi_df.copy()
@@ -3544,7 +3715,7 @@ def main() -> None:
     st.sidebar.markdown("---")
     tipo_relatorio = st.sidebar.radio(
         "Selecione o relatório",
-        options=["Geral", "Marketing", "Financeiro", "Mercado Pago", "IA"],
+        options=["Geral", "Marketing", "Financeiro", "Mercado Pago", "🔴 Análise Limbo", "IA"],
         index=0,
         label_visibility="collapsed",
     )
@@ -3559,9 +3730,19 @@ def main() -> None:
         accept_multiple_files=False,
         key="mercado_pago_file",
     )
+    st.sidebar.markdown("### Arquivo acessório Njuko")
+    uploaded_njuko_input = st.sidebar.file_uploader(
+        "Arquivo financeiro Njuko (xlsx)",
+        type=["xlsx"],
+        accept_multiple_files=False,
+        key="njuko_file",
+    )
     if uploaded_mp_input is not None:
         st.session_state["mercado_pago_file_bytes"] = uploaded_mp_input.getvalue()
         st.session_state["mercado_pago_file_name"] = uploaded_mp_input.name
+    if uploaded_njuko_input is not None:
+        st.session_state["njuko_file_bytes"] = uploaded_njuko_input.getvalue()
+        st.session_state["njuko_file_name"] = uploaded_njuko_input.name
 
     uploaded_mp_file = uploaded_mp_input
     if (
@@ -3571,6 +3752,15 @@ def main() -> None:
     ):
         uploaded_mp_file = BytesIO(st.session_state["mercado_pago_file_bytes"])
         uploaded_mp_file.name = st.session_state["mercado_pago_file_name"]
+
+    uploaded_njuko_file = uploaded_njuko_input
+    if (
+        uploaded_njuko_file is None
+        and "njuko_file_bytes" in st.session_state
+        and "njuko_file_name" in st.session_state
+    ):
+        uploaded_njuko_file = BytesIO(st.session_state["njuko_file_bytes"])
+        uploaded_njuko_file.name = st.session_state["njuko_file_name"]
 
     percurso_targets = DEFAULT_PERCURSO_TARGETS.copy()
     start_date = date(2026, 2, 23)
@@ -3602,6 +3792,11 @@ def main() -> None:
     if uploaded_mp_file:
         df_mp = load_mercado_pago_file(uploaded_mp_file)
         mp_source_name = uploaded_mp_file.name
+    df_njuko: pd.DataFrame | None = None
+    njuko_source_name = ""
+    if uploaded_njuko_file:
+        df_njuko = load_njuko_file(uploaded_njuko_file)
+        njuko_source_name = uploaded_njuko_file.name
 
     if tipo_relatorio == "Mercado Pago":
         st.markdown("<div id='print-content'>", unsafe_allow_html=True)
@@ -3609,6 +3804,30 @@ def main() -> None:
             st.info("Envie o arquivo de vendas Mercado Pago para ver esta aba.")
         else:
             render_dashboard_mercado_pago(df_mp, mp_source_name)
+        st.markdown("</div>", unsafe_allow_html=True)
+        return
+
+    if tipo_relatorio == "🔴 Análise Limbo":
+        st.markdown("<div id='print-content'>", unsafe_allow_html=True)
+        if (df_mp is None and df_njuko is not None) or (df_mp is not None and df_njuko is None):
+            st.warning(
+                "Para rodar a Análise Limbo, envie os dois arquivos: Mercado Pago e Njuko (formato .xlsx)."
+            )
+        elif df_mp is None and df_njuko is None:
+            st.info("Envie os arquivos de Mercado Pago e Njuko para iniciar a Análise Limbo.")
+        else:
+            limbo_summary = render_dashboard_analise_limbo(
+                df_mp=df_mp,
+                df_njuko=df_njuko,
+                mp_source_name=mp_source_name,
+                njuko_source_name=njuko_source_name,
+            )
+            if limbo_summary.get("ok"):
+                st.success(
+                    "Cross-check concluído: "
+                    f"{format_int(limbo_summary['total_limbo'])} atletas no limbo, "
+                    f"com {format_currency_brl_2(limbo_summary['valor_risco'])} em risco."
+                )
         st.markdown("</div>", unsafe_allow_html=True)
         return
 
