@@ -1380,7 +1380,6 @@ def render_marketing_target_gauges(df: pd.DataFrame, targets: dict[str, int]) ->
                 mode="gauge+number",
                 value=inscritos,
                 number={"valueformat": ",.0f"},
-                title={"text": f"{percurso}<br>Meta: {int(meta)}"},
                 gauge={
                     "axis": {"range": [0, axis_max]},
                     "bar": {"color": "#2563eb"},
@@ -1392,10 +1391,38 @@ def render_marketing_target_gauges(df: pd.DataFrame, targets: dict[str, int]) ->
                 },
             )
         )
-        gauge_fig.update_layout(height=250, margin=dict(l=10, r=10, t=60, b=20))
+        gauge_fig.update_layout(height=250, margin=dict(l=10, r=10, t=20, b=20))
         with gauge_cols[idx % 3]:
+            st.markdown(f"**{percurso}**  \nMeta: {format_int(meta)}")
             st.plotly_chart(gauge_fig, use_container_width=True)
             st.caption(f"Inscritos: {format_int(inscritos)} | % da meta: {format_pct(pct_meta)}")
+
+    # Gauge adicional de meta de vendas de Óculos Yopp
+    yopp_total = int(df["yopp_flag"].sum()) if "yopp_flag" in df.columns else 0
+    yopp_meta = 300
+    yopp_pct_meta = (yopp_total / yopp_meta * 100) if yopp_meta else 0
+    yopp_axis_max = max(yopp_meta * 1.05, yopp_total * 1.05, 1.0)
+    yopp_fig = go.Figure(
+        go.Indicator(
+            mode="gauge+number",
+            value=yopp_total,
+            number={"valueformat": ",.0f"},
+            gauge={
+                "axis": {"range": [0, yopp_axis_max]},
+                "bar": {"color": "#2563eb"},
+                "threshold": {
+                    "line": {"color": "#ef4444", "width": 3},
+                    "thickness": 0.9,
+                    "value": yopp_meta,
+                },
+            },
+        )
+    )
+    yopp_fig.update_layout(height=250, margin=dict(l=10, r=10, t=20, b=20))
+    with gauge_cols[len(gauge_df) % 3]:
+        st.markdown(f"**Óculos Yopp**  \nMeta: {format_int(yopp_meta)}")
+        st.plotly_chart(yopp_fig, use_container_width=True)
+        st.caption(f"Vendidos: {format_int(yopp_total)} | % da meta: {format_pct(yopp_pct_meta)}")
 
 
 def render_demography(df: pd.DataFrame, expandido: bool = False) -> None:
@@ -1420,10 +1447,14 @@ def render_demography(df: pd.DataFrame, expandido: bool = False) -> None:
         st.info("Coluna de gênero não disponível para análise.")
     else:
         gender_raw = df[gender_col].astype(str).str.strip().str.lower()
-        gender_norm = pd.Series("Outros/NA", index=df.index, dtype="object")
+        gender_norm = pd.Series(pd.NA, index=df.index, dtype="object")
         gender_norm.loc[gender_raw.isin(AI_FEMALE_TOKENS)] = "Feminino"
         gender_norm.loc[gender_raw.isin(AI_MALE_TOKENS)] = "Masculino"
-        gender_counts = gender_norm.value_counts().rename_axis("Gênero").reset_index(name="Inscritos")
+        gender_counts = (
+            gender_norm.dropna().value_counts().reindex(["Feminino", "Masculino"], fill_value=0)
+            .rename_axis("Gênero")
+            .reset_index(name="Inscritos")
+        )
         total_gender = gender_counts["Inscritos"].sum()
         gender_counts["%"] = gender_counts["Inscritos"].apply(
             lambda v: format_pct((v / total_gender) * 100 if total_gender else 0)
@@ -1535,18 +1566,32 @@ def render_sales_patterns(df: pd.DataFrame) -> None:
         st.info("Sem datas para análise de padrão de vendas.")
         return
 
-    dated["week"] = dated["Registration date"].dt.to_period("W").dt.start_time
     dated["day"] = dated["Registration date"].dt.date
     dated["weekday"] = dated["Registration date"].dt.day_name()
 
-    week_counts = dated.groupby("week").size().reset_index(name="Inscrições").sort_values("week").tail(12)
+    # Mantém 12 janelas semanais discretas para evitar barra única em eixo contínuo.
+    base_day = pd.to_datetime(dated["day"]).max()
+    weekly_intervals = []
+    for i in range(12):
+        end = base_day - pd.Timedelta(days=7 * i)
+        start = end - pd.Timedelta(days=6)
+        weekly_intervals.append((start.normalize(), end.normalize()))
+
+    weekly_data = []
+    day_series = pd.to_datetime(dated["day"])
+    for start, end in weekly_intervals:
+        cnt = int(((day_series >= start) & (day_series <= end)).sum())
+        label = f"{start.strftime('%d/%m')} - {end.strftime('%d/%m')}"
+        weekly_data.append({"Semana": label, "Inscrições": cnt})
+
+    week_counts = pd.DataFrame(weekly_data)[::-1].reset_index(drop=True)
     day_counts = dated.groupby("day").size().reset_index(name="Inscrições").sort_values("day")
     weekday_counts = dated.groupby("weekday").size().reset_index(name="Inscrições")
     weekday_order = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
     weekday_counts["weekday"] = pd.Categorical(weekday_counts["weekday"], categories=weekday_order, ordered=True)
     weekday_counts = weekday_counts.sort_values("weekday")
 
-    fig_week = px.bar(week_counts, x="week", y="Inscrições", title="Últimas 12 semanas", text="Inscrições")
+    fig_week = px.bar(week_counts, x="Semana", y="Inscrições", title="Últimas 12 semanas", text="Inscrições")
     fig_week = style_bar_labels(fig_week)
     st.plotly_chart(fig_week, use_container_width=True)
     col1, col2 = st.columns(2)
@@ -1665,6 +1710,7 @@ def render_team_medical_company(df: pd.DataFrame) -> None:
     team_df = valid_team.rename("team_raw").to_frame()
     team_df["team_key"] = team_df["team_raw"].apply(canonicalize_team_name)
     team_df = team_df[team_df["team_key"] != ""].copy()
+    team_df = team_df[~team_df["team_key"].str.contains(r"\bavulso\b", na=False)].copy()
     if team_df.empty:
         st.info("Não foi possível consolidar os nomes de Team.")
         return
@@ -1748,20 +1794,12 @@ def render_perfil_inscrito(df: pd.DataFrame) -> None:
         st.info("Sem interessados para montar ranking de cidades.")
         return
 
-    city_col = "city" if "city" in interested.columns else "city_norm"
-    top_cities = (
-        interested[city_col]
-        .astype(str)
-        .str.strip()
-        .replace({"": pd.NA, "nan": pd.NA, "NaN": pd.NA})
-        .dropna()
-        .value_counts()
-        .head(5)
-        .rename_axis("Cidade")
-        .reset_index(name="Interessados")
-    )
-    top_cities["% dos interessados"] = top_cities["Interessados"].apply(
-        lambda v: format_pct((v / bus_total) * 100 if bus_total else 0)
+    top_cities = build_top_cities_table(
+        interested,
+        ibge_df=ibge_df,
+        total=bus_total,
+        count_col="Interessados",
+        pct_col="% dos interessados",
     )
     st.dataframe(top_cities, hide_index=True, use_container_width=True)
 
@@ -1861,19 +1899,16 @@ def render_nubank_section(df: pd.DataFrame, ibge_df: pd.DataFrame) -> None:
 
     female_nubank = count_female_entries(nubank_buyers)
     male_nubank = count_male_entries(nubank_buyers)
-    other_nubank = max(nubank_total - female_nubank - male_nubank, 0)
-
     valid_age = nubank_buyers["age"].dropna() if "age" in nubank_buyers.columns else pd.Series(dtype="float64")
     avg_age = valid_age.mean() if not valid_age.empty else 0
     min_age = valid_age.min() if not valid_age.empty else 0
     max_age = valid_age.max() if not valid_age.empty else 0
 
-    c1, c2, c3, c4, c5 = st.columns(5)
+    c1, c2, c3, c4 = st.columns(4)
     c1.metric("Inscritos BRL_FULL", format_int(total_br_full))
     c2.metric("Compraram com Nubank", format_int(nubank_total))
     c3.metric("% BRL_FULL com Nubank", format_pct(nubank_pct))
     c4.metric("Mulheres / Homens", f"{format_int(female_nubank)} / {format_int(male_nubank)}")
-    c5.metric("Outros/NA", format_int(other_nubank))
 
     a1, a2, a3 = st.columns(3)
     a1.metric("Idade média (Nubank)", format_int(avg_age))
@@ -1889,12 +1924,13 @@ def render_nubank_section(df: pd.DataFrame, ibge_df: pd.DataFrame) -> None:
 
     gender_profile = pd.DataFrame(
         {
-            "Perfil": ["Feminino", "Masculino", "Outros/NA"],
-            "Inscritos": [female_nubank, male_nubank, other_nubank],
+            "Perfil": ["Feminino", "Masculino"],
+            "Inscritos": [female_nubank, male_nubank],
         }
     )
+    gender_total = female_nubank + male_nubank
     gender_profile["%"] = gender_profile["Inscritos"].apply(
-        lambda v: format_pct((v / nubank_total) * 100 if nubank_total else 0)
+        lambda v: format_pct((v / gender_total) * 100 if gender_total else 0)
     )
     p1.dataframe(gender_profile, hide_index=True, use_container_width=True)
 
@@ -2191,6 +2227,137 @@ def render_financial_report(df: pd.DataFrame) -> None:
     st.caption(
         "Este estudo considera cupom com 3+ caracteres e desconto > 0. "
         "Classificação atual usa `COUPON_PREFIX_RULES`."
+    )
+
+
+def render_marketing_coupon_block(df: pd.DataFrame) -> None:
+    st.header("CUPOM DE DESCONTOS")
+    coupon_code_clean = df["coupon_code"].fillna("").astype(str).str.strip()
+    coupon_code_clean = coupon_code_clean.replace({"nan": "", "None": "", "none": ""})
+    coupon_code_norm = coupon_code_clean.str.upper().str.replace(r"[^A-Z0-9]", "", regex=True)
+    coupons = df[coupon_code_norm.str.len().ge(3)].copy()
+    if coupons.empty:
+        st.info("Nenhum cupom válido (3+ caracteres) encontrado no recorte atual.")
+        return
+
+    coupons["coupon_code_norm"] = coupon_code_norm.loc[coupons.index]
+    coupons["coupon_category"] = coupons["coupon_code_norm"].str[:3]
+
+    total_coupons_used = int(len(coupons))
+    unique_coupons = int(coupons["coupon_code_norm"].nunique())
+    unique_categories = int(coupons["coupon_category"].nunique())
+    brl_used = int(coupons["edition_currency"].eq("BRL").sum())
+    usd_used = int(coupons["edition_currency"].eq("USD").sum())
+
+    m1, m2, m3, m4, m5 = st.columns(5)
+    m1.metric("Cupons usados (inscrições)", format_int(total_coupons_used))
+    m2.metric("Cupons únicos", format_int(unique_coupons))
+    m3.metric("Categorias únicas (3 letras)", format_int(unique_categories))
+    m4.metric("Uso em BRL", format_int(brl_used))
+    m5.metric("Uso em USD", format_int(usd_used))
+
+    by_currency = (
+        coupons.groupby("edition_currency", dropna=False)
+        .agg(usos=("edition_currency", "size"))
+        .reset_index()
+        .sort_values("usos", ascending=False)
+    )
+    by_currency["% do uso"] = by_currency["usos"].apply(
+        lambda value: format_pct((value / total_coupons_used * 100) if total_coupons_used else 0)
+    )
+    currency_table = by_currency.rename(
+        columns={
+            "edition_currency": "Planilha",
+            "usos": "Cupons usados",
+        }
+    )
+    currency_table["Planilha"] = currency_table["Planilha"].replace({"BRL": "BRL", "USD": "US"})
+    currency_table["Cupons usados"] = currency_table["Cupons usados"].map(format_int)
+    st.subheader("Uso por planilha (BRL e US)")
+    st.dataframe(currency_table, hide_index=True, use_container_width=True)
+
+    by_category = (
+        coupons.groupby("coupon_category", dropna=False)
+        .agg(
+            usos=("coupon_category", "size"),
+            cupons_unicos=("coupon_code_norm", "nunique"),
+        )
+        .reset_index()
+        .sort_values("usos", ascending=False)
+    )
+    by_category["% do uso"] = by_category["usos"].apply(
+        lambda value: format_pct((value / total_coupons_used * 100) if total_coupons_used else 0)
+    )
+    category_table = by_category.rename(
+        columns={
+            "coupon_category": "Categoria (3 letras)",
+            "usos": "Cupons usados",
+            "cupons_unicos": "Cupons únicos",
+        }
+    )
+    category_table["Cupons usados"] = category_table["Cupons usados"].map(format_int)
+    category_table["Cupons únicos"] = category_table["Cupons únicos"].map(format_int)
+    st.subheader("Uso por tipo/categoria de cupom")
+    st.dataframe(category_table, hide_index=True, use_container_width=True)
+
+    by_route = (
+        coupons.groupby("Competition", dropna=False)
+        .agg(
+            usos=("Competition", "size"),
+            categorias=("coupon_category", "nunique"),
+        )
+        .reset_index()
+    )
+    by_route = sort_competitions(by_route, "Competition")
+    by_route["% do uso"] = by_route["usos"].apply(
+        lambda value: format_pct((value / total_coupons_used * 100) if total_coupons_used else 0)
+    )
+    route_table = by_route.rename(
+        columns={
+            "Competition": "Percurso",
+            "usos": "Cupons usados",
+            "categorias": "Categorias ativas",
+        }
+    )
+    route_table["Cupons usados"] = route_table["Cupons usados"].map(format_int)
+    route_table["Categorias ativas"] = route_table["Categorias ativas"].map(format_int)
+    st.subheader("Uso por percurso")
+    st.dataframe(route_table, hide_index=True, use_container_width=True)
+
+    by_category_route = (
+        coupons.groupby(["coupon_category", "Competition"], dropna=False)
+        .agg(usos=("coupon_category", "size"))
+        .reset_index()
+        .sort_values("usos", ascending=False)
+        .head(20)
+    )
+    by_category_route = sort_competitions(by_category_route, "Competition")
+    cruzamento_table = by_category_route.rename(
+        columns={
+            "coupon_category": "Categoria (3 letras)",
+            "Competition": "Percurso",
+            "usos": "Cupons usados",
+        }
+    )
+    cruzamento_table["Cupons usados"] = cruzamento_table["Cupons usados"].map(format_int)
+    st.subheader("Cruzamento categoria x percurso (Top 20)")
+    st.dataframe(cruzamento_table, hide_index=True, use_container_width=True)
+
+    fig_category = px.bar(
+        by_category.head(15),
+        x="coupon_category",
+        y="usos",
+        text="usos",
+        title="Top categorias de cupom por quantidade de uso",
+    )
+    fig_category = style_bar_labels(fig_category)
+    fig_category.update_traces(texttemplate="%{text:,.0f}")
+    fig_category.update_layout(height=320, xaxis_title="Categoria (3 letras)", yaxis_title="Quantidade")
+    st.plotly_chart(fig_category, use_container_width=True)
+
+    st.caption(
+        "Análise gerencial baseada na coluna `Discount codes` (BRL e US). "
+        "Categoria definida pelas 3 primeiras letras do cupom."
     )
 
 
@@ -3882,6 +4049,7 @@ def main() -> None:
         render_header_marketing(scoped, data_base_label)
         render_progress_projection(scoped, percurso_targets, start_date, end_date)
         render_marketing_target_gauges(scoped, percurso_targets)
+        render_marketing_coupon_block(scoped)
         render_demography(scoped, expandido=True)
         render_geography(scoped, ibge_df)
         render_international(scoped)
