@@ -485,17 +485,59 @@ def detect_nubank_column(columns):
     return None
 
 
-def detect_coupon_column(columns):
-    preferred = {"discount_codes", "discount_code", "coupon_code", "coupon_codes"}
-    for col in columns:
-        if normalize_col_name(col) in preferred:
-            return col
+def detect_coupon_column(columns, df: pd.DataFrame | None = None):
+    preferred = {
+        "discount_codes",
+        "discount_code",
+        "discountcodes",
+        "discountcode",
+        "coupon_code",
+        "coupon_codes",
+        "couponcode",
+        "couponcodes",
+    }
+    best_col = None
+    best_score = -1.0
+
     for col in columns:
         col_norm = normalize_col_name(col)
-        has_coupon = any(token in col_norm for token in ["coupon", "cupom", "voucher", "promo", "discount_code"])
-        if has_coupon:
-            return col
-    return None
+        score = 0.0
+
+        if col_norm in preferred:
+            score += 200
+
+        has_coupon_term = any(token in col_norm for token in ["coupon", "cupom", "voucher"])
+        has_discount_term = any(token in col_norm for token in ["discount", "desconto"])
+        has_code_term = any(token in col_norm for token in ["code", "codigo", "codes", "codigos"])
+        has_promo_term = any(token in col_norm for token in ["promo", "promoc"])
+
+        if has_coupon_term:
+            score += 120
+        if has_discount_term and has_code_term:
+            score += 120
+        if has_discount_term:
+            score += 40
+        if has_code_term:
+            score += 30
+        if has_promo_term and has_code_term:
+            score += 15
+
+        # Desempate por conteúdo: prioriza colunas com valores com cara de cupom (3+ chars alfanuméricos).
+        if df is not None and col in df.columns:
+            series = df[col].fillna("").astype(str).str.strip()
+            series = series.replace({"nan": "", "None": "", "none": ""})
+            non_empty_ratio = float(series.ne("").mean()) if len(series) else 0.0
+            normalized = series.str.upper().str.replace(r"[^A-Z0-9]", "", regex=True)
+            coupon_like_ratio = float(normalized.str.len().ge(3).mean()) if len(normalized) else 0.0
+            score += non_empty_ratio * 20
+            score += coupon_like_ratio * 80
+
+        if score > best_score:
+            best_score = score
+            best_col = col
+
+    # Evita retornar coluna aleatória sem nenhum indício de cupom.
+    return best_col if best_score >= 80 else None
 
 
 def pick_existing_column(columns, candidates):
@@ -802,7 +844,7 @@ def preprocess_uploaded_file(uploaded_file, validate_required: bool = True) -> p
     else:
         df["bin_number"] = ""
 
-    coupon_col = detect_coupon_column(df.columns)
+    coupon_col = detect_coupon_column(df.columns, df=df)
     if coupon_col:
         df["coupon_code"] = df[coupon_col].astype(str).str.strip()
         df["coupon_code"] = df["coupon_code"].replace({"nan": "", "None": "", "none": ""})
@@ -1736,7 +1778,7 @@ def render_team_medical_company(df: pd.DataFrame) -> None:
     t2.plotly_chart(fig_team, use_container_width=True)
 
 
-def render_perfil_inscrito(df: pd.DataFrame) -> None:
+def render_perfil_inscrito(df: pd.DataFrame, ibge_df: pd.DataFrame) -> None:
     st.header("Ônibus Oficial")
     total = len(df)
     if total == 0:
@@ -4058,7 +4100,7 @@ def main() -> None:
         render_team_medical_company(scoped)
         render_yopp_section(scoped, ibge_df)
         render_nubank_section(scoped, ibge_df)
-        render_perfil_inscrito(scoped)
+        render_perfil_inscrito(scoped, ibge_df)
     else:
         render_header_financial(scoped, data_base_label)
         render_financial_report(scoped)
