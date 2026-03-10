@@ -172,22 +172,80 @@ def apply_theme() -> None:
     )
 
 
-def apply_print_css() -> None:
-    st.markdown(
-        """
+def apply_print_css(print_mode: bool = False) -> None:
+    screen_preview_css = """
+        [data-testid="stMainBlockContainer"] {
+          max-width: 980px !important;
+          margin: 0 auto !important;
+          padding: 1.2rem 1.2rem 2.2rem 1.2rem !important;
+          background: #ffffff !important;
+          border-radius: 12px;
+          box-shadow: 0 6px 24px rgba(15, 23, 42, 0.08);
+        }
+    """
+    if not print_mode:
+        screen_preview_css = ""
+
+    css = """
         <style>
+        __SCREEN_PREVIEW_CSS__
         @media print {
+          @page {
+            size: A4 portrait;
+            margin: 12mm 10mm 14mm 10mm;
+          }
+          html, body, [data-testid="stAppViewContainer"] {
+            background: #ffffff !important;
+          }
           [data-testid="stSidebar"], [data-testid="stToolbar"], header, footer {
             display: none !important;
           }
-          .element-container, .stTable, .plotly-graph-div {
+          .stDeployButton {
+            display: none !important;
+          }
+          [data-testid="stMainBlockContainer"] {
+            max-width: 100% !important;
+            padding: 0 !important;
+          }
+          h1, h2, h3 {
+            page-break-after: avoid !important;
+            break-after: avoid-page !important;
+          }
+          .element-container, .stTable, .plotly-graph-div, div[data-testid="stMetric"] {
             page-break-inside: avoid !important;
+            break-inside: avoid-page !important;
+          }
+          .print-page-break {
+            page-break-after: always !important;
+            break-after: page !important;
+            height: 0 !important;
+          }
+          div[role="tablist"], button[role="tab"] {
+            display: none !important;
+          }
+          div[role="tabpanel"] {
+            display: block !important;
+            visibility: visible !important;
+          }
+          [data-testid="stExpander"] details > summary {
+            display: none !important;
+          }
+          [data-testid="stExpander"] details > div {
+            display: block !important;
           }
         }
         </style>
-        """,
+        """.replace("__SCREEN_PREVIEW_CSS__", screen_preview_css)
+
+    st.markdown(
+        css,
         unsafe_allow_html=True,
     )
+
+
+def insert_print_break(enabled: bool) -> None:
+    if enabled:
+        st.markdown('<div class="print-page-break"></div>', unsafe_allow_html=True)
 
 
 def norm_text(text: str) -> str:
@@ -1580,7 +1638,7 @@ def render_international(df: pd.DataFrame) -> None:
     top_5 = nat_counts.head(5).copy()
     top_5["% dos inscritos totais"] = top_5["Inscritos"].apply(lambda v: format_pct((v / total_inscritos) * 100))
     st.dataframe(top_5, hide_index=True, use_container_width=True)
-    with st.expander("Lista completa de países"):
+    with st.expander("Lista completa de países", expanded=st.session_state.get("print_mode", False)):
         full = nat_counts.copy()
         full["% dos inscritos totais"] = full["Inscritos"].apply(lambda v: format_pct((v / total_inscritos) * 100))
         st.dataframe(full, hide_index=True, use_container_width=True)
@@ -3094,7 +3152,7 @@ def render_dashboard_ia(
     with action_col_2:
         st.caption("Perguntas quantitativas tentam cálculo em pandas antes da chamada ao modelo.")
 
-    with st.expander("Diagnóstico de leitura da base (IA)", expanded=False):
+    with st.expander("Diagnóstico de leitura da base (IA)", expanded=st.session_state.get("print_mode", False)):
         diagnostic_df = build_ai_upload_diagnostic(full_df, filtered_df)
         if diagnostic_df.empty:
             st.info("Sem planilhas principais carregadas na sessão para diagnóstico.")
@@ -3283,6 +3341,9 @@ def render_dashboard_mercado_pago(df_mp: pd.DataFrame, source_name: str) -> None
         f"Registros totais no período/filtros: {format_int(total_orders_base)} | "
         f"Qtde com cancelamento/reembolso (aprovadas): {format_int(refund_count)}"
     )
+
+    if st.session_state.get("print_mode", False):
+        st.info("Modo impressão ativo: ao exportar, as três abas serão incluídas no PDF.")
 
     tab_exec, tab_fin, tab_ops = st.tabs(
         ["Resumo executivo", "Financeiro detalhado", "Comportamento de vendas"]
@@ -3856,7 +3917,10 @@ def render_dashboard_analise_limbo(
     detail_df["Recebimento"] = detail_df["Recebimento_num"].map(format_currency_brl_2)
     detail_view = detail_df[detail_cols].copy()
 
-    with st.expander(f"Tabela detalhada dos atletas no limbo ({format_int(total_limbo)} registros)"):
+    with st.expander(
+        f"Tabela detalhada dos atletas no limbo ({format_int(total_limbo)} registros)",
+        expanded=st.session_state.get("print_mode", False),
+    ):
         st.dataframe(detail_view, hide_index=True, use_container_width=True)
 
     excel_buffer = BytesIO()
@@ -3911,7 +3975,6 @@ def render_exports(raw_df: pd.DataFrame, kpi_df: pd.DataFrame) -> None:
 
 def main() -> None:
     apply_theme()
-    apply_print_css()
     st.sidebar.title("Configurações 2026")
     st.sidebar.caption("Dashboard único em Streamlit com upload manual BRL/USD.")
     st.sidebar.caption(f"Versão: {get_app_version_stamp()}")
@@ -3986,7 +4049,18 @@ def main() -> None:
             )
         start_date = st.sidebar.date_input("Início da campanha", value=date(2026, 2, 23))
         end_date = st.sidebar.date_input("Fim da campanha", value=date(2026, 8, 14))
-    if st.sidebar.button("Imprimir / Exportar PDF", use_container_width=True):
+    st.sidebar.markdown("### PDF")
+    print_mode = st.sidebar.toggle(
+        "Modo impressão otimizado (A4)",
+        value=False,
+        help="Ajusta largura, expande seções e melhora paginação para exportação em PDF.",
+    )
+    st.session_state["print_mode"] = print_mode
+    apply_print_css(print_mode)
+    if print_mode:
+        st.sidebar.caption("Recomendado: usar escala entre 95% e 100% no salvar como PDF do navegador.")
+    print_button_label = "Gerar PDF (layout otimizado)" if print_mode else "Imprimir / Exportar PDF"
+    if st.sidebar.button(print_button_label, use_container_width=True):
         components.html("<script>window.print();</script>", height=0, width=0)
 
     full_df: pd.DataFrame | None = None
@@ -4079,11 +4153,14 @@ def main() -> None:
     if tipo_relatorio == "Geral":
         render_header(scoped, data_base_label)
         render_venn_unique_athletes(full_df)
+        insert_print_break(print_mode)
         render_progress_projection(scoped, percurso_targets, start_date, end_date)
         render_demography(scoped)
+        insert_print_break(print_mode)
         render_geography(scoped, ibge_df)
         render_international(scoped)
         render_sales_patterns(scoped)
+        insert_print_break(print_mode)
         render_financial(scoped)
         render_nubank_section(scoped, ibge_df)
         render_exports(full_df, scoped)
@@ -4092,9 +4169,11 @@ def main() -> None:
         render_progress_projection(scoped, percurso_targets, start_date, end_date)
         render_marketing_target_gauges(scoped, percurso_targets)
         render_marketing_coupon_block(scoped)
+        insert_print_break(print_mode)
         render_demography(scoped, expandido=True)
         render_geography(scoped, ibge_df)
         render_international(scoped)
+        insert_print_break(print_mode)
         render_sales_patterns(scoped)
         render_horarios_venda(scoped)
         render_team_medical_company(scoped)
@@ -4103,10 +4182,11 @@ def main() -> None:
         render_perfil_inscrito(scoped, ibge_df)
     else:
         render_header_financial(scoped, data_base_label)
+        insert_print_break(print_mode)
         render_financial_report(scoped)
         render_exports(full_df, scoped)
 
-    with st.expander("Diagnóstico técnico dos uploads"):
+    with st.expander("Diagnóstico técnico dos uploads", expanded=st.session_state.get("print_mode", False)):
         diag = (
             full_df.groupby(["source_file", "edition_currency"])
             .size()
