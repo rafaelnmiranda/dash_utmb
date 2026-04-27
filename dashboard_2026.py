@@ -156,7 +156,7 @@ HISTORICAL_AI_GITHUB_SOURCES = [
 
 
 def apply_theme() -> None:
-    st.markdown(
+    st.html(
         """
         <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap');
@@ -418,8 +418,7 @@ def apply_theme() -> None:
             margin-bottom: 8px;
         }
         </style>
-        """,
-        unsafe_allow_html=True,
+        """
     )
 
 
