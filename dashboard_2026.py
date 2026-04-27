@@ -158,9 +158,8 @@ HISTORICAL_AI_GITHUB_SOURCES = [
 def apply_theme() -> None:
     st.markdown(
         """
-        <link rel="preconnect" href="https://fonts.googleapis.com">
-        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
         <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap');
         /* ── Base ─────────────────────────────────────────────────────────── */
         html, body, [class*="css"], .stApp {
             font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif !important;
