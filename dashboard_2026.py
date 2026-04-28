@@ -12,6 +12,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.figure_factory as ff
 import plotly.graph_objects as go
+import plotly.io as pio
 import requests
 import streamlit as st
 import streamlit.components.v1 as components
@@ -29,6 +30,23 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+
+# ── Apple-inspired Plotly template ──────────────────────────────────────────
+_APPLE_PLOTLY_TEMPLATE = go.layout.Template(
+    layout=go.Layout(
+        font=dict(family="Inter, -apple-system, BlinkMacSystemFont, sans-serif", color="#1d1d1f", size=13),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        colorway=["#0066cc", "#34c759", "#ff9f0a", "#ff3b30", "#5856d6", "#32ade6", "#272729"],
+        xaxis=dict(showgrid=False, linecolor="rgba(0,0,0,0.08)", tickfont=dict(size=12)),
+        yaxis=dict(gridcolor="rgba(0,0,0,0.06)", linecolor="rgba(0,0,0,0.08)", tickfont=dict(size=12)),
+        margin=dict(t=36, b=36, l=8, r=8),
+        legend=dict(bgcolor="rgba(0,0,0,0)", font=dict(size=12)),
+        hoverlabel=dict(bgcolor="#ffffff", bordercolor="rgba(0,0,0,0.08)", font=dict(family="Inter, sans-serif", size=13)),
+    )
+)
+pio.templates["apple"] = _APPLE_PLOTLY_TEMPLATE
+pio.templates.default = "plotly+apple"
 
 EXCHANGE_RATE_USD_TO_BRL = 5.0
 YOPP_PRICE_BRL = 159.0
@@ -137,38 +155,66 @@ HISTORICAL_AI_GITHUB_SOURCES = [
 ]
 
 
+_APPLE_CSS = (
+    "@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap');"
+    "html,body,[class*='css'],.stApp{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Helvetica Neue',sans-serif!important}"
+    ".main,[data-testid='stAppViewContainer']{background:#ffffff!important}"
+    "[data-testid='stSidebar']{background:#f5f5f7!important;border-right:1px solid rgba(0,0,0,0.08)}"
+    "[data-testid='stSidebar'] *{font-family:'Inter',sans-serif!important}"
+    ".hero-tile{background:#272729;color:#fff;padding:48px 40px;margin-bottom:32px;border-radius:0;text-align:center}"
+    ".hero-tile .hero-title{font-size:40px;font-weight:600;letter-spacing:-0.4px;line-height:1.1;margin:0 0 10px;color:#fff}"
+    ".hero-tile .hero-sub{font-size:21px;font-weight:400;color:rgba(255,255,255,0.72);margin:0}"
+    ".hero-tile .hero-badge{display:inline-block;background:#0066cc;color:#fff;border-radius:980px;padding:6px 18px;font-size:14px;font-weight:400;margin-top:20px}"
+    ".u-card{background:#ffffff;border:1px solid rgba(0,0,0,0.08);border-radius:18px;padding:24px;margin-bottom:16px}"
+    ".u-card-parchment{background:#f5f5f7;border:none;border-radius:18px;padding:24px;margin-bottom:16px}"
+    ".kpi-block{text-align:center;padding:20px 12px}"
+    ".kpi-value{font-size:40px;font-weight:600;letter-spacing:-0.4px;line-height:1.1;color:#1d1d1f;margin:0}"
+    ".kpi-value-sm{font-size:28px;font-weight:600;letter-spacing:-0.28px;line-height:1.14;color:#1d1d1f;margin:0}"
+    ".kpi-label{font-size:14px;font-weight:400;letter-spacing:-0.224px;color:rgba(0,0,0,0.48);margin:4px 0 0 0}"
+    ".kpi-delta-pos{font-size:13px;font-weight:600;color:#34c759;margin:2px 0 0 0}"
+    ".kpi-delta-neg{font-size:13px;font-weight:600;color:#ff3b30;margin:2px 0 0 0}"
+    ".kpi-blue{font-size:13px;font-weight:600;color:#0066cc;margin:2px 0 0 0}"
+    ".section-title{font-size:28px;font-weight:600;letter-spacing:-0.28px;color:#1d1d1f;margin:40px 0 4px;line-height:1.14}"
+    ".section-sub{font-size:17px;font-weight:400;letter-spacing:-0.374px;color:rgba(0,0,0,0.48);margin:0 0 24px}"
+    ".section-divider{border:none;border-top:1px solid rgba(0,0,0,0.08);margin:40px 0}"
+    ".pill{display:inline-block;background:#0066cc;color:#fff;border-radius:980px;padding:4px 14px;font-size:13px;font-weight:400}"
+    ".pill-outline{display:inline-block;background:transparent;color:#0066cc;border:1px solid #0066cc;border-radius:980px;padding:4px 14px;font-size:13px}"
+    ".pill-neutral{display:inline-block;background:#f5f5f7;color:#1d1d1f;border:1px solid rgba(0,0,0,0.08);border-radius:980px;padding:4px 14px;font-size:13px}"
+    ".progress-wrap{background:rgba(0,0,0,0.06);border-radius:980px;height:6px;margin:8px 0;overflow:hidden}"
+    ".progress-fill{background:#0066cc;height:6px;border-radius:980px}"
+    ".progress-fill-green{background:#34c759}"
+    ".progress-fill-orange{background:#ff9f0a}"
+    ".progress-fill-red{background:#ff3b30}"
+    ".route-card{background:#ffffff;border:1px solid rgba(0,0,0,0.08);border-radius:18px;padding:20px 16px;text-align:center}"
+    ".route-name{font-size:14px;font-weight:600;color:rgba(0,0,0,0.48);text-transform:uppercase;margin-bottom:6px}"
+    ".route-count{font-size:32px;font-weight:600;letter-spacing:-0.32px;color:#1d1d1f;line-height:1.1}"
+    ".route-pct{font-size:13px;color:#0066cc;font-weight:600;margin-top:4px}"
+    "[data-testid='stMetric']{background:#ffffff;border:1px solid rgba(0,0,0,0.08);border-radius:18px;padding:16px 20px}"
+    "[data-testid='stMetricLabel'] p{font-size:13px!important;color:rgba(0,0,0,0.48)!important;font-weight:400!important}"
+    "[data-testid='stMetricValue']{font-size:28px!important;font-weight:600!important;color:#1d1d1f!important}"
+    ".hero{background:#272729;border-radius:18px;padding:24px 28px;color:#fff;margin-bottom:16px}"
+    ".hero h2,.hero p{margin:0;padding:0}"
+    ".subtle{color:rgba(0,0,0,0.48);font-size:13px}"
+    ".module-card{background:#f5f5f7;border:none;border-radius:12px;padding:10px 12px;margin-bottom:8px}"
+)
+
+
 def apply_theme() -> None:
-    st.markdown(
-        """
-        <style>
-        .main {
-            background: linear-gradient(180deg, #F7F9FC 0%, #FFFFFF 100%);
-        }
-        .hero {
-            background: linear-gradient(135deg, #0b2447 0%, #19376d 100%);
-            border-radius: 16px;
-            padding: 20px 24px;
-            color: white;
-            margin-bottom: 12px;
-        }
-        .hero h2, .hero p {
-            margin: 0;
-            padding: 0;
-        }
-        .subtle {
-            color: #6b7280;
-            font-size: 0.9rem;
-        }
-        .module-card {
-            background: #f8fafc;
-            border: 1px solid #e5e7eb;
-            border-radius: 12px;
-            padding: 10px 12px;
-            margin-bottom: 8px;
-        }
-        </style>
-        """,
-        unsafe_allow_html=True,
+    css_json = json.dumps(_APPLE_CSS)
+    components.html(
+        f"""<script>
+        (function(){{
+            var id='utmb-apple-css';
+            var prev=window.parent.document.getElementById(id);
+            if(prev)prev.remove();
+            var el=window.parent.document.createElement('style');
+            el.id=id;
+            el.textContent={css_json};
+            window.parent.document.head.appendChild(el);
+        }})();
+        </script>""",
+        height=0,
+        scrolling=False,
     )
 
 
@@ -923,16 +969,28 @@ def preprocess_uploaded_file(uploaded_file, validate_required: bool = True) -> p
     total_registration_col = pick_existing_column(df.columns, ["Total registration amount", "Registration amount"])
     total_discounts_col = pick_existing_column(df.columns, ["Total discounts amount", "Discounts amount"])
 
+    def _safe_to_numeric(series: pd.Series) -> pd.Series:
+        """Converte para numérico tratando tanto ponto quanto vírgula como separador decimal."""
+        if series.dtype == object:
+            series = (
+                series.astype(str)
+                .str.strip()
+                .str.replace(r"[R$\s ]", "", regex=True)
+                .str.replace(r"\.(?=\d{3}(?:[,\.]|$))", "", regex=True)  # remove ponto de milhar
+                .str.replace(",", ".", regex=False)
+            )
+        return pd.to_numeric(series, errors="coerce").fillna(0)
+
     registration_series = (
-        pd.to_numeric(df.get(registration_col), errors="coerce").fillna(0) if registration_col else pd.Series(0, index=df.index)
+        _safe_to_numeric(df.get(registration_col, pd.Series(dtype=object))) if registration_col else pd.Series(0, index=df.index)
     )
     total_registration_series = (
-        pd.to_numeric(df.get(total_registration_col), errors="coerce").fillna(0)
+        _safe_to_numeric(df.get(total_registration_col, pd.Series(dtype=object)))
         if total_registration_col
         else pd.Series(0, index=df.index)
     )
     total_discounts_series = (
-        pd.to_numeric(df.get(total_discounts_col), errors="coerce").fillna(0)
+        _safe_to_numeric(df.get(total_discounts_col, pd.Series(dtype=object)))
         if total_discounts_col
         else pd.Series(0, index=df.index)
     )
@@ -3973,6 +4031,473 @@ def render_exports(raw_df: pd.DataFrame, kpi_df: pd.DataFrame) -> None:
     )
 
 
+def _pct_color_class(pct: float) -> str:
+    if pct >= 90:
+        return "progress-fill-green"
+    if pct >= 60:
+        return ""
+    return "progress-fill-orange"
+
+
+def _route_progress_bar(pct: float) -> str:
+    clamped = min(pct, 100)
+    cls = _pct_color_class(pct)
+    return (
+        f'<div class="progress-wrap">'
+        f'<div class="progress-fill {cls}" style="width:{clamped:.1f}%"></div>'
+        f"</div>"
+    )
+
+
+def render_marketing_diario(df: pd.DataFrame, targets: dict[str, int], data_base_label: str) -> None:
+    """Snapshot diário para leitura rápida — sem valores financeiros."""
+    total = len(df)
+    total_target = sum(targets.values())
+    pct_meta = (total / total_target * 100) if total_target else 0
+
+    female = count_female_entries(df)
+    pct_female = (female / total * 100) if total else 0
+    foreigners = df[df["nationality_std"] != "BR"].shape[0] if "nationality_std" in df.columns else 0
+    pct_foreigners = (foreigners / total * 100) if total else 0
+    countries = df["country_std"].replace({"": pd.NA, "NAN": pd.NA}).dropna().nunique() if "country_std" in df.columns else 0
+    br_states = df[df["nationality_std"] == "BR"]["state_std"].dropna().nunique() if "state_std" in df.columns else 0
+
+    # Hero tile
+    pct_meta_fmt = f"{pct_meta:.1f}%"
+    st.markdown(
+        f"""
+        <div class="hero-tile">
+          <p style="font-size:13px;font-weight:400;letter-spacing:0.2px;color:rgba(255,255,255,0.5);
+                    text-transform:uppercase;margin:0 0 12px 0;">
+            Marketing · Snapshot Diário
+          </p>
+          <p class="hero-title">Paraty by UTMB 2026</p>
+          <p class="hero-sub">Base atualizada até {data_base_label}</p>
+          <span class="hero-badge">{format_int(total)} inscritos · {pct_meta_fmt} da meta</span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    # Pulso do dia
+    today_ts = pd.Timestamp.now().normalize()
+    dated = df.dropna(subset=["Registration date"]).copy() if "Registration date" in df.columns else pd.DataFrame()
+
+    hoje = 0
+    ontem = 0
+    med_7d = 0.0
+    if not dated.empty:
+        dated["_day"] = dated["Registration date"].dt.normalize()
+        hoje = int((dated["_day"] == today_ts).sum())
+        ontem = int((dated["_day"] == today_ts - pd.Timedelta(days=1)).sum())
+        last7 = dated[dated["_day"] >= today_ts - pd.Timedelta(days=6)]
+        med_7d = len(last7) / 7
+
+    st.markdown('<p class="section-title">Pulso de hoje</p>', unsafe_allow_html=True)
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Inscrições hoje", format_int(hoje))
+    c2.metric("Inscrições ontem", format_int(ontem))
+    c3.metric("Média últimos 7 dias", f"{med_7d:.1f}")
+    c4.metric("Meta geral", f"{format_int(total_target)}")
+
+    st.markdown('<hr class="section-divider">', unsafe_allow_html=True)
+
+    # Progresso por percurso — route cards
+    st.markdown('<p class="section-title">Progresso por percurso</p>', unsafe_allow_html=True)
+
+    per_route = (
+        df.groupby("Competition").size().rename("inscritos").reset_index()
+        if "Competition" in df.columns
+        else pd.DataFrame(columns=["Competition", "inscritos"])
+    )
+    route_map = dict(zip(per_route["Competition"], per_route["inscritos"]))
+
+    cols = st.columns(len(PERCURSO_ORDER))
+    for col, percurso in zip(cols, PERCURSO_ORDER):
+        inscr = route_map.get(percurso, 0)
+        target = targets.get(percurso, 0)
+        pct = (inscr / target * 100) if target else 0
+        fill_cls = _pct_color_class(pct)
+        bar = _route_progress_bar(pct)
+        col.markdown(
+            f"""
+            <div class="route-card">
+              <p class="route-name">{percurso}</p>
+              <p class="route-count">{format_int(inscr)}</p>
+              <p class="route-pct">{pct:.1f}% da meta</p>
+              {bar}
+              <p class="kpi-label">Meta: {format_int(target)}</p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    st.markdown('<hr class="section-divider">', unsafe_allow_html=True)
+
+    # Perfil e alcance
+    st.markdown('<p class="section-title">Perfil e alcance</p>', unsafe_allow_html=True)
+    p1, p2 = st.columns(2)
+    with p1:
+        st.markdown(
+            f"""
+            <div class="u-card">
+              <p class="kpi-label">Mulheres</p>
+              <p class="kpi-value">{format_int(female)}</p>
+              <p class="kpi-blue">{pct_female:.1f}% do total</p>
+              <br>
+              <p class="kpi-label">Estrangeiros</p>
+              <p class="kpi-value">{format_int(foreigners)}</p>
+              <p class="kpi-blue">{pct_foreigners:.1f}% do total</p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    with p2:
+        st.markdown(
+            f"""
+            <div class="u-card">
+              <p class="kpi-label">Países representados</p>
+              <p class="kpi-value">{format_int(countries)}</p>
+              <br>
+              <p class="kpi-label">Estados brasileiros</p>
+              <p class="kpi-value">{format_int(br_states)}</p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    st.markdown('<hr class="section-divider">', unsafe_allow_html=True)
+
+    # Ritmo de venda — últimos 7 dias + linha de ritmo necessário
+    st.markdown('<p class="section-title">Ritmo de venda</p><p class="section-sub">Últimos 7 dias</p>', unsafe_allow_html=True)
+    if not dated.empty:
+        last14 = dated[dated["_day"] >= today_ts - pd.Timedelta(days=13)].copy()
+        day_counts = last14.groupby("_day").size().reset_index(name="Inscrições")
+        day_counts["_day"] = pd.to_datetime(day_counts["_day"])
+        day_counts["Dia"] = day_counts["_day"].dt.strftime("%d/%m")
+        fig_ritmo = px.bar(
+            day_counts,
+            x="Dia",
+            y="Inscrições",
+            text="Inscrições",
+            title="Inscrições por dia — últimos 14 dias",
+        )
+        fig_ritmo = style_bar_labels(fig_ritmo)
+        fig_ritmo.update_layout(height=280)
+        st.plotly_chart(fig_ritmo, use_container_width=True)
+    else:
+        st.info("Sem dados de data para análise de ritmo.")
+
+
+def render_marketing_semanal(
+    df: pd.DataFrame,
+    targets: dict[str, int],
+    data_base_label: str,
+    ibge_df: pd.DataFrame,
+) -> None:
+    """Relatório semanal completo para envio às segundas-feiras — sem valores financeiros."""
+    today_ts = pd.Timestamp.now().normalize()
+    dated = df.dropna(subset=["Registration date"]).copy() if "Registration date" in df.columns else pd.DataFrame()
+    if not dated.empty:
+        dated["_day"] = dated["Registration date"].dt.normalize()
+
+    # ── Semana atual e anterior ────────────────────────────────────────────────
+    monday = today_ts - pd.Timedelta(days=today_ts.dayofweek)
+    week_start = monday - pd.Timedelta(days=7)
+    week_end = monday - pd.Timedelta(days=1)
+    prev_week_start = week_start - pd.Timedelta(days=7)
+    prev_week_end = week_start - pd.Timedelta(days=1)
+
+    def _count_in_range(start: pd.Timestamp, end: pd.Timestamp) -> int:
+        if dated.empty:
+            return 0
+        return int(((dated["_day"] >= start) & (dated["_day"] <= end)).sum())
+
+    this_week = _count_in_range(week_start, week_end)
+    prev_week = _count_in_range(prev_week_start, prev_week_end)
+    delta_pct = ((this_week - prev_week) / prev_week * 100) if prev_week else 0
+
+    total = len(df)
+    total_target = sum(targets.values())
+    pct_meta = (total / total_target * 100) if total_target else 0
+
+    # ── Hero tile ──────────────────────────────────────────────────────────────
+    week_label = f"{week_start.strftime('%d/%m')} – {week_end.strftime('%d/%m')}"
+    st.markdown(
+        f"""
+        <div class="hero-tile">
+          <p style="font-size:13px;font-weight:400;letter-spacing:0.2px;color:rgba(255,255,255,0.5);
+                    text-transform:uppercase;margin:0 0 12px 0;">
+            Marketing · Relatório Semanal
+          </p>
+          <p class="hero-title">Paraty by UTMB 2026</p>
+          <p class="hero-sub">Semana de {week_label} · Base até {data_base_label}</p>
+          <span class="hero-badge">{format_int(total)} inscritos · {pct_meta:.1f}% da meta</span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    # ── Bloco 1 — Panorama semanal ─────────────────────────────────────────────
+    st.markdown('<p class="section-title">Panorama da semana</p>', unsafe_allow_html=True)
+    delta_arrow = "▲" if delta_pct >= 0 else "▼"
+    delta_color = "kpi-delta-pos" if delta_pct >= 0 else "kpi-delta-neg"
+    c1, c2, c3, c4 = st.columns(4)
+    with c1:
+        st.markdown(
+            f'<div class="kpi-block"><p class="kpi-value-sm">{format_int(this_week)}</p>'
+            f'<p class="kpi-label">Inscrições esta semana</p></div>',
+            unsafe_allow_html=True,
+        )
+    with c2:
+        st.markdown(
+            f'<div class="kpi-block"><p class="kpi-value-sm">{format_int(prev_week)}</p>'
+            f'<p class="kpi-label">Semana anterior</p></div>',
+            unsafe_allow_html=True,
+        )
+    with c3:
+        st.markdown(
+            f'<div class="kpi-block"><p class="kpi-value-sm">{delta_arrow} {abs(delta_pct):.1f}%</p>'
+            f'<p class="kpi-label">Variação</p></div>',
+            unsafe_allow_html=True,
+        )
+    with c4:
+        bar_html = _route_progress_bar(pct_meta)
+        st.markdown(
+            f'<div class="kpi-block"><p class="kpi-value-sm">{pct_meta:.1f}%</p>'
+            f'<p class="kpi-label">Meta geral</p>{bar_html}</div>',
+            unsafe_allow_html=True,
+        )
+
+    st.markdown('<hr class="section-divider">', unsafe_allow_html=True)
+
+    # ── Bloco 2 — Progresso por percurso ──────────────────────────────────────
+    st.markdown('<p class="section-title">Progresso por percurso</p>', unsafe_allow_html=True)
+    per_route = (
+        df.groupby("Competition").size().rename("inscritos").reset_index()
+        if "Competition" in df.columns
+        else pd.DataFrame(columns=["Competition", "inscritos"])
+    )
+    route_map = dict(zip(per_route["Competition"], per_route["inscritos"]))
+
+    route_rows = []
+    for percurso in PERCURSO_ORDER:
+        inscr = route_map.get(percurso, 0)
+        target = targets.get(percurso, 0)
+        pct = (inscr / target * 100) if target else 0
+        # this week per route
+        if not dated.empty and "Competition" in dated.columns:
+            tw = int(((dated["_day"] >= week_start) & (dated["_day"] <= week_end) & (dated["Competition"] == percurso)).sum())
+            pw = int(((dated["_day"] >= prev_week_start) & (dated["_day"] <= prev_week_end) & (dated["Competition"] == percurso)).sum())
+        else:
+            tw, pw = 0, 0
+        d_pct = ((tw - pw) / pw * 100) if pw else 0
+        route_rows.append({"Percurso": percurso, "Inscritos": inscr, "Meta": target, "% Meta": f"{pct:.1f}%",
+                           "Esta semana": tw, "Δ% vs sem. ant.": f"{'+' if d_pct >= 0 else ''}{d_pct:.1f}%"})
+
+    route_df = pd.DataFrame(route_rows)
+    st.dataframe(route_df, hide_index=True, use_container_width=True)
+
+    # Gauges por percurso
+    cols = st.columns(len(PERCURSO_ORDER))
+    for col, row in zip(cols, route_rows):
+        pct_val = (row["Inscritos"] / row["Meta"] * 100) if row["Meta"] else 0
+        bar = _route_progress_bar(pct_val)
+        col.markdown(
+            f"""
+            <div class="route-card">
+              <p class="route-name">{row['Percurso']}</p>
+              <p class="route-count">{format_int(row['Inscritos'])}</p>
+              <p class="route-pct">{pct_val:.1f}%</p>
+              {bar}
+              <p class="kpi-label">+{format_int(row['Esta semana'])} esta sem.</p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    st.markdown('<hr class="section-divider">', unsafe_allow_html=True)
+
+    # ── Bloco 3 — Ritmo de venda ───────────────────────────────────────────────
+    st.markdown('<p class="section-title">Ritmo de venda</p><p class="section-sub">Últimas 8 semanas</p>', unsafe_allow_html=True)
+    if not dated.empty:
+        weekly_data = []
+        for i in range(8):
+            ws = monday - pd.Timedelta(days=7 * (i + 1))
+            we = ws + pd.Timedelta(days=6)
+            cnt = _count_in_range(ws, we)
+            weekly_data.append({"Semana": ws.strftime("%d/%m"), "Inscrições": cnt})
+        week_df = pd.DataFrame(weekly_data[::-1])
+
+        # projeção: se mantiver ritmo médio das últimas 4 semanas
+        avg4 = week_df.tail(4)["Inscrições"].mean()
+        remaining_target = max(total_target - total, 0)
+        weeks_needed = (remaining_target / avg4) if avg4 > 0 else 0
+
+        fig_w = px.bar(week_df, x="Semana", y="Inscrições", text="Inscrições", title="Inscrições por semana")
+        fig_w = style_bar_labels(fig_w)
+        fig_w.update_layout(height=300)
+        st.plotly_chart(fig_w, use_container_width=True)
+
+        pr1, pr2, pr3 = st.columns(3)
+        pr1.metric("Média últimas 4 semanas", f"{avg4:.1f} insc/sem")
+        pr2.metric("Faltam para meta", format_int(remaining_target))
+        pr3.metric("Semanas estimadas", f"{weeks_needed:.1f}")
+
+    st.markdown('<hr class="section-divider">', unsafe_allow_html=True)
+
+    # ── Bloco 4 — Perfil e alcance ─────────────────────────────────────────────
+    st.markdown('<p class="section-title">Perfil e alcance</p>', unsafe_allow_html=True)
+    female = count_female_entries(df)
+    pct_female = (female / total * 100) if total else 0
+    foreigners = df[df["nationality_std"] != "BR"].shape[0] if "nationality_std" in df.columns else 0
+    pct_foreigners = (foreigners / total * 100) if total else 0
+    countries = df["country_std"].replace({"": pd.NA, "NAN": pd.NA}).dropna().nunique() if "country_std" in df.columns else 0
+    br_states = df[df["nationality_std"] == "BR"]["state_std"].dropna().nunique() if "state_std" in df.columns else 0
+
+    # Top 5 países internacionais
+    top_countries = pd.DataFrame()
+    if "country_std" in df.columns:
+        foreign_df = df[df["nationality_std"] != "BR"] if "nationality_std" in df.columns else df
+        top_countries = (
+            foreign_df["country_std"]
+            .replace({"": pd.NA, "NAN": pd.NA})
+            .dropna()
+            .value_counts()
+            .head(5)
+            .rename_axis("País")
+            .reset_index(name="Inscritos")
+        )
+
+    pf1, pf2 = st.columns(2)
+    with pf1:
+        st.markdown(
+            f"""
+            <div class="u-card">
+              <p class="kpi-label" style="margin-bottom:16px;">Gênero</p>
+              <p class="kpi-value">{format_int(female)}</p>
+              <p class="kpi-blue">{pct_female:.1f}% mulheres</p>
+              <br>
+              <p class="kpi-label">Estados brasileiros</p>
+              <p class="kpi-value-sm">{format_int(br_states)}</p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    with pf2:
+        st.markdown(
+            f"""
+            <div class="u-card">
+              <p class="kpi-label" style="margin-bottom:16px;">Internacional</p>
+              <p class="kpi-value">{format_int(foreigners)}</p>
+              <p class="kpi-blue">{pct_foreigners:.1f}% do total · {format_int(countries)} países</p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        if not top_countries.empty:
+            st.dataframe(top_countries, hide_index=True, use_container_width=True)
+
+    st.markdown('<hr class="section-divider">', unsafe_allow_html=True)
+
+    # ── Bloco 5 — Demográfico ──────────────────────────────────────────────────
+    st.markdown('<p class="section-title">Demográfico</p>', unsafe_allow_html=True)
+    render_demography(df, expandido=False)
+
+    st.markdown('<hr class="section-divider">', unsafe_allow_html=True)
+
+    # ── Bloco 6 — Yopp ────────────────────────────────────────────────────────
+    st.markdown('<p class="section-title">Yopp</p>', unsafe_allow_html=True)
+    if "yopp_flag" in df.columns:
+        yopp_total = int(df["yopp_flag"].sum())
+        yopp_pct = (yopp_total / total * 100) if total else 0
+        yopp_week = 0
+        yopp_prev = 0
+        if not dated.empty and "yopp_flag" in dated.columns:
+            yopp_week = int(((dated["_day"] >= week_start) & (dated["_day"] <= week_end) & (dated["yopp_flag"] > 0)).sum())
+            yopp_prev = int(((dated["_day"] >= prev_week_start) & (dated["_day"] <= prev_week_end) & (dated["yopp_flag"] > 0)).sum())
+        yopp_delta = ((yopp_week - yopp_prev) / yopp_prev * 100) if yopp_prev else 0
+        y1, y2, y3, y4 = st.columns(4)
+        y1.metric("Total Yopp", format_int(yopp_total))
+        y2.metric("% dos inscritos", format_pct(yopp_pct))
+        y3.metric("Esta semana", format_int(yopp_week))
+        y4.metric("Δ vs sem. ant.", f"{'+' if yopp_delta >= 0 else ''}{yopp_delta:.1f}%")
+    else:
+        st.info("Coluna Yopp não disponível nesta base.")
+
+    st.markdown('<hr class="section-divider">', unsafe_allow_html=True)
+
+    # ── Bloco 7 — Nubank ──────────────────────────────────────────────────────
+    st.markdown('<p class="section-title">Nubank</p>', unsafe_allow_html=True)
+    if "nubank_flag" in df.columns and "source_file" in df.columns:
+        br_full = df[df["source_file"].astype(str).str.contains(r"brl[\s_-]*full", case=False, na=False, regex=True)]
+        if not br_full.empty:
+            nubank_total = int(br_full["nubank_flag"].sum())
+            total_br_full = len(br_full)
+            nubank_pct = (nubank_total / total_br_full * 100) if total_br_full else 0
+
+            dated_br = dated[dated["source_file"].astype(str).str.contains(r"brl[\s_-]*full", case=False, na=False, regex=True)].copy() if not dated.empty and "source_file" in dated.columns else pd.DataFrame()
+            nw, np_ = 0, 0
+            if not dated_br.empty and "nubank_flag" in dated_br.columns:
+                nw = int(((dated_br["_day"] >= week_start) & (dated_br["_day"] <= week_end) & (dated_br["nubank_flag"] > 0)).sum())
+                np_ = int(((dated_br["_day"] >= prev_week_start) & (dated_br["_day"] <= prev_week_end) & (dated_br["nubank_flag"] > 0)).sum())
+            nd = ((nw - np_) / np_ * 100) if np_ else 0
+
+            n1, n2, n3, n4 = st.columns(4)
+            n1.metric("Total Nubank (BRL)", format_int(nubank_total))
+            n2.metric("% BRL_FULL", format_pct(nubank_pct))
+            n3.metric("Esta semana", format_int(nw))
+            n4.metric("Δ vs sem. ant.", f"{'+' if nd >= 0 else ''}{nd:.1f}%")
+        else:
+            st.info("Nenhum registro BRL_FULL encontrado para análise Nubank.")
+    else:
+        st.info("Colunas Nubank não disponíveis nesta base.")
+
+    st.markdown('<hr class="section-divider">', unsafe_allow_html=True)
+
+    # ── Bloco 8 — Padrões de venda ─────────────────────────────────────────────
+    st.markdown('<p class="section-title">Padrões de venda</p>', unsafe_allow_html=True)
+    render_horarios_venda(df)
+    if not dated.empty:
+        weekday_order = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+        weekday_pt = {"Monday": "Seg", "Tuesday": "Ter", "Wednesday": "Qua",
+                      "Thursday": "Qui", "Friday": "Sex", "Saturday": "Sáb", "Sunday": "Dom"}
+        dated["weekday"] = dated["Registration date"].dt.day_name()
+        wd_counts = dated.groupby("weekday").size().reset_index(name="Inscrições")
+        wd_counts["weekday"] = pd.Categorical(wd_counts["weekday"], categories=weekday_order, ordered=True)
+        wd_counts = wd_counts.sort_values("weekday")
+        wd_counts["Dia"] = wd_counts["weekday"].map(weekday_pt)
+        fig_wd = px.bar(wd_counts, x="Dia", y="Inscrições", text="Inscrições", title="Inscrições por dia da semana (acumulado)")
+        fig_wd = style_bar_labels(fig_wd)
+        fig_wd.update_layout(height=280)
+        st.plotly_chart(fig_wd, use_container_width=True)
+
+    st.markdown('<hr class="section-divider">', unsafe_allow_html=True)
+
+    # ── Bloco 9 — Cupons (quantidade, sem R$) ─────────────────────────────────
+    st.markdown('<p class="section-title">Cupons e descontos</p><p class="section-sub">Quantidade de uso — sem valores</p>', unsafe_allow_html=True)
+    if "coupon_code" in df.columns:
+        with_coupon = df[df["coupon_code"].astype(str).str.strip().ne("") & df["coupon_code"].notna()]
+        total_coupon = len(with_coupon)
+        pct_coupon = (total_coupon / total * 100) if total else 0
+
+        k1, k2 = st.columns(2)
+        k1.metric("Inscrições com cupom", format_int(total_coupon))
+        k2.metric("% dos inscritos", format_pct(pct_coupon))
+
+        if "coupon_family" in df.columns and total_coupon > 0:
+            fam = (
+                with_coupon["coupon_family"]
+                .value_counts()
+                .rename_axis("Família de cupom")
+                .reset_index(name="Usos")
+            )
+            fam["% do total c/ cupom"] = fam["Usos"].apply(lambda v: format_pct((v / total_coupon * 100) if total_coupon else 0))
+            st.dataframe(fam, hide_index=True, use_container_width=True)
+    else:
+        st.info("Coluna de cupom não disponível.")
+
+
 def main() -> None:
     apply_theme()
     st.sidebar.title("Configurações 2026")
@@ -3987,13 +4512,9 @@ def main() -> None:
     st.sidebar.markdown("---")
     tipo_relatorio = st.sidebar.radio(
         "Selecione o relatório",
-        options=["Geral", "Marketing", "Financeiro", "Mercado Pago", "🔴 Análise Limbo", "IA"],
+        options=["Geral", "Marketing", "Marketing Diário", "Marketing Semanal", "Financeiro", "Mercado Pago"],
         index=0,
         label_visibility="collapsed",
-    )
-    include_github_history_ia = st.sidebar.checkbox(
-        "IA: incluir histórico GitHub (2023-2025)",
-        value=True,
     )
     st.sidebar.markdown("### Arquivo acessório Mercado Pago")
     uploaded_mp_input = st.sidebar.file_uploader(
@@ -4090,39 +4611,6 @@ def main() -> None:
         st.markdown("</div>", unsafe_allow_html=True)
         return
 
-    if tipo_relatorio == "🔴 Análise Limbo":
-        st.markdown("<div id='print-content'>", unsafe_allow_html=True)
-        if (df_mp is None and df_njuko is not None) or (df_mp is not None and df_njuko is None):
-            st.warning(
-                "Para rodar a Análise Limbo, envie os dois arquivos: Mercado Pago e Njuko (formato .xlsx)."
-            )
-        elif df_mp is None and df_njuko is None:
-            st.info("Envie os arquivos de Mercado Pago e Njuko para iniciar a Análise Limbo.")
-        else:
-            limbo_summary = render_dashboard_analise_limbo(
-                df_mp=df_mp,
-                df_njuko=df_njuko,
-                mp_source_name=mp_source_name,
-                njuko_source_name=njuko_source_name,
-            )
-            if limbo_summary.get("ok"):
-                st.success(
-                    "Cross-check concluído: "
-                    f"{format_int(limbo_summary['total_limbo'])} atletas no limbo, "
-                    f"com {format_currency_brl_2(limbo_summary['valor_risco'])} em risco."
-                )
-        st.markdown("</div>", unsafe_allow_html=True)
-        return
-
-    if tipo_relatorio == "IA":
-        st.markdown("<div id='print-content'>", unsafe_allow_html=True)
-        ia_full_df, ia_filtered_df = build_ia_base(
-            uploaded_full_df=full_df,
-            include_github_history=include_github_history_ia,
-        )
-        render_dashboard_ia(full_df=ia_full_df, filtered_df=ia_filtered_df, mp_df=df_mp)
-        st.markdown("</div>", unsafe_allow_html=True)
-        return
 
     if full_df is None or filtered is None:
         st.info("Envie as planilhas para iniciar o dashboard 2026.")
@@ -4180,6 +4668,10 @@ def main() -> None:
         render_yopp_section(scoped, ibge_df)
         render_nubank_section(scoped, ibge_df)
         render_perfil_inscrito(scoped, ibge_df)
+    elif tipo_relatorio == "Marketing Diário":
+        render_marketing_diario(scoped, percurso_targets, data_base_label)
+    elif tipo_relatorio == "Marketing Semanal":
+        render_marketing_semanal(scoped, percurso_targets, data_base_label, ibge_df)
     else:
         render_header_financial(scoped, data_base_label)
         insert_print_break(print_mode)
