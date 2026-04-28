@@ -155,270 +155,66 @@ HISTORICAL_AI_GITHUB_SOURCES = [
 ]
 
 
+_APPLE_CSS = (
+    "@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap');"
+    "html,body,[class*='css'],.stApp{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Helvetica Neue',sans-serif!important}"
+    ".main,[data-testid='stAppViewContainer']{background:#ffffff!important}"
+    "[data-testid='stSidebar']{background:#f5f5f7!important;border-right:1px solid rgba(0,0,0,0.08)}"
+    "[data-testid='stSidebar'] *{font-family:'Inter',sans-serif!important}"
+    ".hero-tile{background:#272729;color:#fff;padding:48px 40px;margin-bottom:32px;border-radius:0;text-align:center}"
+    ".hero-tile .hero-title{font-size:40px;font-weight:600;letter-spacing:-0.4px;line-height:1.1;margin:0 0 10px;color:#fff}"
+    ".hero-tile .hero-sub{font-size:21px;font-weight:400;color:rgba(255,255,255,0.72);margin:0}"
+    ".hero-tile .hero-badge{display:inline-block;background:#0066cc;color:#fff;border-radius:980px;padding:6px 18px;font-size:14px;font-weight:400;margin-top:20px}"
+    ".u-card{background:#ffffff;border:1px solid rgba(0,0,0,0.08);border-radius:18px;padding:24px;margin-bottom:16px}"
+    ".u-card-parchment{background:#f5f5f7;border:none;border-radius:18px;padding:24px;margin-bottom:16px}"
+    ".kpi-block{text-align:center;padding:20px 12px}"
+    ".kpi-value{font-size:40px;font-weight:600;letter-spacing:-0.4px;line-height:1.1;color:#1d1d1f;margin:0}"
+    ".kpi-value-sm{font-size:28px;font-weight:600;letter-spacing:-0.28px;line-height:1.14;color:#1d1d1f;margin:0}"
+    ".kpi-label{font-size:14px;font-weight:400;letter-spacing:-0.224px;color:rgba(0,0,0,0.48);margin:4px 0 0 0}"
+    ".kpi-delta-pos{font-size:13px;font-weight:600;color:#34c759;margin:2px 0 0 0}"
+    ".kpi-delta-neg{font-size:13px;font-weight:600;color:#ff3b30;margin:2px 0 0 0}"
+    ".kpi-blue{font-size:13px;font-weight:600;color:#0066cc;margin:2px 0 0 0}"
+    ".section-title{font-size:28px;font-weight:600;letter-spacing:-0.28px;color:#1d1d1f;margin:40px 0 4px;line-height:1.14}"
+    ".section-sub{font-size:17px;font-weight:400;letter-spacing:-0.374px;color:rgba(0,0,0,0.48);margin:0 0 24px}"
+    ".section-divider{border:none;border-top:1px solid rgba(0,0,0,0.08);margin:40px 0}"
+    ".pill{display:inline-block;background:#0066cc;color:#fff;border-radius:980px;padding:4px 14px;font-size:13px;font-weight:400}"
+    ".pill-outline{display:inline-block;background:transparent;color:#0066cc;border:1px solid #0066cc;border-radius:980px;padding:4px 14px;font-size:13px}"
+    ".pill-neutral{display:inline-block;background:#f5f5f7;color:#1d1d1f;border:1px solid rgba(0,0,0,0.08);border-radius:980px;padding:4px 14px;font-size:13px}"
+    ".progress-wrap{background:rgba(0,0,0,0.06);border-radius:980px;height:6px;margin:8px 0;overflow:hidden}"
+    ".progress-fill{background:#0066cc;height:6px;border-radius:980px}"
+    ".progress-fill-green{background:#34c759}"
+    ".progress-fill-orange{background:#ff9f0a}"
+    ".progress-fill-red{background:#ff3b30}"
+    ".route-card{background:#ffffff;border:1px solid rgba(0,0,0,0.08);border-radius:18px;padding:20px 16px;text-align:center}"
+    ".route-name{font-size:14px;font-weight:600;color:rgba(0,0,0,0.48);text-transform:uppercase;margin-bottom:6px}"
+    ".route-count{font-size:32px;font-weight:600;letter-spacing:-0.32px;color:#1d1d1f;line-height:1.1}"
+    ".route-pct{font-size:13px;color:#0066cc;font-weight:600;margin-top:4px}"
+    "[data-testid='stMetric']{background:#ffffff;border:1px solid rgba(0,0,0,0.08);border-radius:18px;padding:16px 20px}"
+    "[data-testid='stMetricLabel'] p{font-size:13px!important;color:rgba(0,0,0,0.48)!important;font-weight:400!important}"
+    "[data-testid='stMetricValue']{font-size:28px!important;font-weight:600!important;color:#1d1d1f!important}"
+    ".hero{background:#272729;border-radius:18px;padding:24px 28px;color:#fff;margin-bottom:16px}"
+    ".hero h2,.hero p{margin:0;padding:0}"
+    ".subtle{color:rgba(0,0,0,0.48);font-size:13px}"
+    ".module-card{background:#f5f5f7;border:none;border-radius:12px;padding:10px 12px;margin-bottom:8px}"
+)
+
+
 def apply_theme() -> None:
-    st.html(
-        """
-        <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap');
-        /* ── Base ─────────────────────────────────────────────────────────── */
-        html, body, [class*="css"], .stApp {
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif !important;
-        }
-        .main, [data-testid="stAppViewContainer"] {
-            background: #ffffff !important;
-        }
-
-        /* ── Sidebar ──────────────────────────────────────────────────────── */
-        [data-testid="stSidebar"] {
-            background: #f5f5f7 !important;
-            border-right: 1px solid rgba(0,0,0,0.08);
-        }
-        [data-testid="stSidebar"] * {
-            font-family: 'Inter', sans-serif !important;
-        }
-
-        /* ── Hero tile (dark) ─────────────────────────────────────────────── */
-        .hero-tile {
-            background: #272729;
-            color: #ffffff;
-            padding: 48px 40px;
-            margin-bottom: 32px;
-            border-radius: 0;
-            text-align: center;
-        }
-        .hero-tile .hero-title {
-            font-size: 40px;
-            font-weight: 600;
-            letter-spacing: -0.4px;
-            line-height: 1.1;
-            margin: 0 0 10px 0;
-            color: #ffffff;
-        }
-        .hero-tile .hero-sub {
-            font-size: 21px;
-            font-weight: 400;
-            letter-spacing: 0.2px;
-            color: rgba(255,255,255,0.72);
-            margin: 0;
-        }
-        .hero-tile .hero-badge {
-            display: inline-block;
-            background: #0066cc;
-            color: #ffffff;
-            border-radius: 980px;
-            padding: 6px 18px;
-            font-size: 14px;
-            font-weight: 400;
-            margin-top: 20px;
-            letter-spacing: -0.1px;
-        }
-
-        /* ── Utility card ─────────────────────────────────────────────────── */
-        .u-card {
-            background: #ffffff;
-            border: 1px solid rgba(0,0,0,0.08);
-            border-radius: 18px;
-            padding: 24px;
-            margin-bottom: 16px;
-        }
-        .u-card-parchment {
-            background: #f5f5f7;
-            border: none;
-            border-radius: 18px;
-            padding: 24px;
-            margin-bottom: 16px;
-        }
-
-        /* ── KPI metric ───────────────────────────────────────────────────── */
-        .kpi-block {
-            text-align: center;
-            padding: 20px 12px;
-        }
-        .kpi-value {
-            font-size: 40px;
-            font-weight: 600;
-            letter-spacing: -0.4px;
-            line-height: 1.1;
-            color: #1d1d1f;
-            margin: 0;
-        }
-        .kpi-value-sm {
-            font-size: 28px;
-            font-weight: 600;
-            letter-spacing: -0.28px;
-            line-height: 1.14;
-            color: #1d1d1f;
-            margin: 0;
-        }
-        .kpi-label {
-            font-size: 14px;
-            font-weight: 400;
-            letter-spacing: -0.224px;
-            color: rgba(0,0,0,0.48);
-            margin: 4px 0 0 0;
-        }
-        .kpi-delta-pos {
-            font-size: 13px;
-            font-weight: 600;
-            color: #34c759;
-            margin: 2px 0 0 0;
-        }
-        .kpi-delta-neg {
-            font-size: 13px;
-            font-weight: 600;
-            color: #ff3b30;
-            margin: 2px 0 0 0;
-        }
-        .kpi-blue {
-            font-size: 13px;
-            font-weight: 600;
-            color: #0066cc;
-            margin: 2px 0 0 0;
-        }
-
-        /* ── Section headings ─────────────────────────────────────────────── */
-        .section-title {
-            font-size: 28px;
-            font-weight: 600;
-            letter-spacing: -0.28px;
-            color: #1d1d1f;
-            margin: 40px 0 4px 0;
-            line-height: 1.14;
-        }
-        .section-sub {
-            font-size: 17px;
-            font-weight: 400;
-            letter-spacing: -0.374px;
-            color: rgba(0,0,0,0.48);
-            margin: 0 0 24px 0;
-        }
-        .section-divider {
-            border: none;
-            border-top: 1px solid rgba(0,0,0,0.08);
-            margin: 40px 0;
-        }
-
-        /* ── Pills & badges ───────────────────────────────────────────────── */
-        .pill {
-            display: inline-block;
-            background: #0066cc;
-            color: #ffffff;
-            border-radius: 980px;
-            padding: 4px 14px;
-            font-size: 13px;
-            font-weight: 400;
-        }
-        .pill-outline {
-            display: inline-block;
-            background: transparent;
-            color: #0066cc;
-            border: 1px solid #0066cc;
-            border-radius: 980px;
-            padding: 4px 14px;
-            font-size: 13px;
-            font-weight: 400;
-        }
-        .pill-neutral {
-            display: inline-block;
-            background: #f5f5f7;
-            color: #1d1d1f;
-            border: 1px solid rgba(0,0,0,0.08);
-            border-radius: 980px;
-            padding: 4px 14px;
-            font-size: 13px;
-            font-weight: 400;
-        }
-
-        /* ── Progress bar ─────────────────────────────────────────────────── */
-        .progress-wrap {
-            background: rgba(0,0,0,0.06);
-            border-radius: 980px;
-            height: 6px;
-            margin: 8px 0;
-            overflow: hidden;
-        }
-        .progress-fill {
-            background: #0066cc;
-            height: 6px;
-            border-radius: 980px;
-            transition: width 0.4s ease;
-        }
-        .progress-fill-green { background: #34c759; }
-        .progress-fill-orange { background: #ff9f0a; }
-        .progress-fill-red { background: #ff3b30; }
-
-        /* ── Route card ───────────────────────────────────────────────────── */
-        .route-card {
-            background: #ffffff;
-            border: 1px solid rgba(0,0,0,0.08);
-            border-radius: 18px;
-            padding: 20px 16px;
-            text-align: center;
-        }
-        .route-name {
-            font-size: 14px;
-            font-weight: 600;
-            letter-spacing: -0.1px;
-            color: rgba(0,0,0,0.48);
-            text-transform: uppercase;
-            margin-bottom: 6px;
-        }
-        .route-count {
-            font-size: 32px;
-            font-weight: 600;
-            letter-spacing: -0.32px;
-            color: #1d1d1f;
-            line-height: 1.1;
-        }
-        .route-pct {
-            font-size: 13px;
-            color: #0066cc;
-            font-weight: 600;
-            margin-top: 4px;
-        }
-
-        /* ── Streamlit overrides ──────────────────────────────────────────── */
-        [data-testid="stMetric"] {
-            background: #ffffff;
-            border: 1px solid rgba(0,0,0,0.08);
-            border-radius: 18px;
-            padding: 16px 20px;
-        }
-        [data-testid="stMetricLabel"] {
-            font-size: 13px !important;
-            color: rgba(0,0,0,0.48) !important;
-            font-weight: 400 !important;
-        }
-        [data-testid="stMetricValue"] {
-            font-size: 28px !important;
-            font-weight: 600 !important;
-            color: #1d1d1f !important;
-            letter-spacing: -0.28px !important;
-        }
-        [data-testid="stMetricDelta"] {
-            font-size: 13px !important;
-        }
-
-        /* ── Legacy hero override (compatibility) ─────────────────────────── */
-        .hero {
-            background: #272729;
-            border-radius: 18px;
-            padding: 24px 28px;
-            color: white;
-            margin-bottom: 16px;
-        }
-        .hero h2, .hero p { margin: 0; padding: 0; }
-
-        .subtle { color: rgba(0,0,0,0.48); font-size: 13px; }
-        .module-card {
-            background: #f5f5f7;
-            border: none;
-            border-radius: 12px;
-            padding: 10px 12px;
-            margin-bottom: 8px;
-        }
-        </style>
-        """
+    css_json = json.dumps(_APPLE_CSS)
+    components.html(
+        f"""<script>
+        (function(){{
+            var id='utmb-apple-css';
+            var prev=window.parent.document.getElementById(id);
+            if(prev)prev.remove();
+            var el=window.parent.document.createElement('style');
+            el.id=id;
+            el.textContent={css_json};
+            window.parent.document.head.appendChild(el);
+        }})();
+        </script>""",
+        height=0,
+        scrolling=False,
     )
 
 
