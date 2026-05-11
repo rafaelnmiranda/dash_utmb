@@ -1,3 +1,4 @@
+import html
 import json
 import re
 import subprocess
@@ -6,20 +7,15 @@ import difflib
 from datetime import date, datetime
 from io import BytesIO
 from pathlib import Path
-from typing import Any
 
 import pandas as pd
 import plotly.express as px
 import plotly.figure_factory as ff
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 import requests
 import streamlit as st
 import streamlit.components.v1 as components
-
-try:
-    from openai import OpenAI
-except Exception:  # noqa: BLE001
-    OpenAI = None
 
 
 st.set_page_config(
@@ -60,15 +56,6 @@ REQUIRED_COLUMNS = [
     "Registration amount",
     "Total registration amount",
     "Total discounts amount",
-]
-AI_QUICK_QUESTIONS_INSCRICOES = [
-    "Quantas mulheres estão inscritas nos 4 anos de evento?",
-    "Quantos inscritos existem por ano?",
-    "Quantos anos de evento existem na sessão atual?",
-    "Qual a receita líquida total em BRL na sessão atual?",
-]
-AI_QUICK_QUESTIONS_MP = [
-    "No Mercado Pago, qual foi o total líquido recebido e a taxa média?",
 ]
 AI_GENDER_CANDIDATES = ["gender", "gênero", "genero", "sexo", "sex"]
 AI_FEMALE_TOKENS = {"f", "female"}
@@ -117,24 +104,6 @@ HISTORICAL_VENN_FILES = {
         "UTMB - 2025 - USD.xlsx",
     ],
 }
-HISTORICAL_AI_GITHUB_SOURCES = [
-    {
-        "name": "UTMB - 2023 - USD.xlsx [GITHUB]",
-        "url": "https://raw.githubusercontent.com/rafaelnmiranda/dash_utmb/main/UTMB%20-%202023%20-%20USD.xlsx",
-    },
-    {
-        "name": "UTMB - 2024 - USD.xlsx [GITHUB]",
-        "url": "https://raw.githubusercontent.com/rafaelnmiranda/dash_utmb/main/UTMB%20-%202024%20-%20USD.xlsx",
-    },
-    {
-        "name": "UTMB - 2025 - USD.xlsx [GITHUB]",
-        "url": "https://raw.githubusercontent.com/rafaelnmiranda/dash_utmb/main/UTMB%20-%202025%20-%20USD.xlsx",
-    },
-    {
-        "name": "UTMB - 2025 - BRL.xlsx [GITHUB]",
-        "url": "https://raw.githubusercontent.com/rafaelnmiranda/dash_utmb/main/UTMB%20-%202025%20-%20BRL.xlsx",
-    },
-]
 
 
 def apply_theme() -> None:
@@ -155,6 +124,25 @@ def apply_theme() -> None:
             margin: 0;
             padding: 0;
         }
+        .hero-report .hero-row {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+        .hero-report .hero-badge {
+            display: inline-block;
+            font-weight: 700;
+            font-size: 0.78rem;
+            letter-spacing: 1px;
+            color: white;
+            padding: 6px 12px;
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.15);
+            white-space: nowrap;
+        }
+        .hero-report .hero-text {
+            flex: 1;
+        }
         .subtle {
             color: #6b7280;
             font-size: 0.9rem;
@@ -163,8 +151,44 @@ def apply_theme() -> None:
             background: #f8fafc;
             border: 1px solid #e5e7eb;
             border-radius: 12px;
-            padding: 10px 12px;
+            padding: 12px 16px;
+            margin-bottom: 10px;
+        }
+        .highlight-card {
+            background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+            border: 1px solid #e2e8f0;
+            border-left: 4px solid #0b2447;
+            border-radius: 10px;
+            padding: 10px 14px;
             margin-bottom: 8px;
+            box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+        }
+        .highlight-card .highlight-title {
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: #64748b;
+        }
+        .highlight-card .highlight-value {
+            font-size: 1.05rem;
+            font-weight: 700;
+            color: #0b2447;
+            margin-top: 2px;
+        }
+        .highlight-card .highlight-hint {
+            font-size: 0.82rem;
+            color: #475569;
+            margin-top: 2px;
+        }
+        div[data-testid="stMetric"] {
+            background: #ffffff;
+            border: 1px solid #eef2f7;
+            border-radius: 10px;
+            padding: 10px 12px;
+        }
+        div[data-testid="stMetric"] label {
+            color: #475569 !important;
         }
         </style>
         """,
@@ -172,7 +196,13 @@ def apply_theme() -> None:
     )
 
 
-def apply_print_css(print_mode: bool = False) -> None:
+def apply_print_css(print_mode: bool = False, report_mode: str | None = None) -> None:
+    """Injeta CSS de impressão.
+
+    `report_mode` pode ser "diario" (1 página, sem quebras forçadas) ou
+    "semanal" (multipágina, quebra antes de cada h2 para manter blocos íntegros).
+    Para os demais relatórios o comportamento original é mantido.
+    """
     screen_preview_css = """
         [data-testid="stMainBlockContainer"] {
           max-width: 980px !important;
@@ -185,6 +215,65 @@ def apply_print_css(print_mode: bool = False) -> None:
     """
     if not print_mode:
         screen_preview_css = ""
+
+    if report_mode == "diario":
+        mode_specific_css = """
+          /* Diário: caber em uma página A4. Tudo evita break, fontes ligeiramente menores. */
+          #print-content { font-size: 11px !important; }
+          #print-content h2 { font-size: 18px !important; }
+          #print-content h3, #print-content h4 { font-size: 14px !important; }
+          #print-content .hero { padding: 10px 14px !important; margin-bottom: 8px !important; }
+          #print-content .hero h2 { font-size: 18px !important; }
+          #print-content [data-testid="stMetric"] {
+            padding-top: 4px !important;
+            padding-bottom: 4px !important;
+          }
+          #print-content .plotly-graph-div { max-height: 280px !important; }
+          #print-content,
+          #print-content .element-container,
+          #print-content .stTable,
+          #print-content .plotly-graph-div,
+          #print-content div[data-testid="stMetric"],
+          #print-content .highlight-card {
+            page-break-inside: avoid !important;
+            break-inside: avoid-page !important;
+          }
+          #print-content .mkt-kpi-card, #print-content .mkt-kpi-wrap {
+            page-break-inside: avoid !important;
+            break-inside: avoid-page !important;
+          }
+          #print-content h2, #print-content h3 {
+            page-break-before: auto !important;
+            break-before: auto !important;
+          }
+        """
+    elif report_mode == "semanal":
+        mode_specific_css = """
+          /* Semanal: paginação por bloco, com quebra antes de cada h2 (exceto o primeiro). */
+          #print-content h2 {
+            page-break-before: always !important;
+            break-before: page !important;
+          }
+          #print-content > div:first-of-type h2,
+          #print-content .hero + * h2:first-of-type {
+            page-break-before: avoid !important;
+            break-before: avoid-page !important;
+          }
+          #print-content .element-container,
+          #print-content .stTable,
+          #print-content .plotly-graph-div,
+          #print-content div[data-testid="stMetric"],
+          #print-content .highlight-card {
+            page-break-inside: avoid !important;
+            break-inside: avoid-page !important;
+          }
+          #print-content .mkt-kpi-card, #print-content .mkt-kpi-wrap {
+            page-break-inside: avoid !important;
+            break-inside: avoid-page !important;
+          }
+        """
+    else:
+        mode_specific_css = ""
 
     css = """
         <style>
@@ -233,9 +322,12 @@ def apply_print_css(print_mode: bool = False) -> None:
           [data-testid="stExpander"] details > div {
             display: block !important;
           }
+          __MODE_SPECIFIC_CSS__
         }
         </style>
-        """.replace("__SCREEN_PREVIEW_CSS__", screen_preview_css)
+        """.replace("__SCREEN_PREVIEW_CSS__", screen_preview_css).replace(
+        "__MODE_SPECIFIC_CSS__", mode_specific_css
+    )
 
     st.markdown(
         css,
@@ -294,6 +386,90 @@ def style_bar_labels(fig: go.Figure) -> go.Figure:
     fig.update_layout(uniformtext_minsize=10, uniformtext_mode="hide")
     fig.update_xaxes(automargin=True)
     fig.update_yaxes(automargin=True)
+    return fig
+
+
+def _inside_bar_label_color(marker_hex: str) -> str:
+    """Light fills → dark label; dark fills → white (weekly compare charts)."""
+    h = str(marker_hex).lstrip("#")
+    if len(h) != 6:
+        return "#ffffff"
+    try:
+        r = int(h[0:2], 16)
+        g = int(h[2:4], 16)
+        b = int(h[4:6], 16)
+    except ValueError:
+        return "#ffffff"
+    luminance = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255.0
+    return "#0f172a" if luminance > 0.62 else "#ffffff"
+
+
+def _weekly_compare_textposition(value: float, max_pair: float, *, frac: float = 0.16) -> str:
+    """Prefer inside; thin bars vs the pair scale get outside labels."""
+    if max_pair <= 0:
+        return "inside"
+    return "outside" if float(value) < frac * float(max_pair) else "inside"
+
+
+def _polish_weekly_compare_bar_figure(fig: go.Figure) -> None:
+    fig.update_traces(
+        selector=dict(type="bar"),
+        insidetextanchor="middle",
+        cliponaxis=False,
+        constraintext="both",
+    )
+    fig.update_layout(uniformtext_minsize=9, uniformtext_mode="hide")
+    fig.update_xaxes(automargin=True)
+    fig.update_yaxes(automargin=True)
+
+
+# Paleta institucional aplicada a todos os gráficos (escala azul UTMB + acentos).
+BRAND_COLORWAY = [
+    "#0b2447",  # navy core
+    "#19376d",  # navy mid
+    "#576cbc",  # blue light
+    "#a5d7e8",  # ice
+    "#f59e0b",  # amber accent
+    "#dc2626",  # red alert
+    "#16a34a",  # green positive
+    "#9333ea",  # purple highlight
+]
+
+
+def apply_brand_chart_style(fig: go.Figure, *, height: int | None = None) -> go.Figure:
+    """Aplica paleta, fonte e margens consistentes a qualquer figura plotly."""
+    fig.update_layout(
+        colorway=BRAND_COLORWAY,
+        font=dict(family="Inter, system-ui, sans-serif", color="#1f2937", size=13),
+        title_font=dict(family="Inter, system-ui, sans-serif", color="#0b2447", size=16),
+        plot_bgcolor="#ffffff",
+        paper_bgcolor="#ffffff",
+        margin=dict(l=8, r=8, t=44, b=8),
+        legend=dict(orientation="h", yanchor="bottom", y=-0.18, xanchor="left", x=0.0),
+    )
+    fig.update_xaxes(
+        showgrid=False,
+        zeroline=False,
+        linecolor="#e5e7eb",
+        tickcolor="#e5e7eb",
+        title_font=dict(color="#475569", size=12),
+        tickfont=dict(color="#334155", size=12),
+    )
+    fig.update_yaxes(
+        showgrid=True,
+        gridcolor="#f1f5f9",
+        zeroline=False,
+        linecolor="#e5e7eb",
+        tickcolor="#e5e7eb",
+        title_font=dict(color="#475569", size=12),
+        tickfont=dict(color="#334155", size=12),
+    )
+    title_obj = fig.layout.title
+    title_text = getattr(title_obj, "text", None) if title_obj is not None else None
+    if not title_text:
+        fig.update_layout(title=None)
+    if height is not None:
+        fig.update_layout(height=height)
     return fig
 
 
@@ -711,6 +887,38 @@ def classify_coupon_prefix(code: str) -> str:
         return "SEM_CUPOM"
     prefix = clean[:3]
     return COUPON_PREFIX_RULES.get(prefix, f"OUTROS ({prefix})")
+
+
+def _coupon_code_normalized_alnum(df: pd.DataFrame) -> pd.Series:
+    if "coupon_code" not in df.columns:
+        return pd.Series("", index=df.index)
+    s = (
+        df["coupon_code"]
+        .astype(str)
+        .str.strip()
+        .str.upper()
+        .str.replace(r"[^A-Z0-9]", "", regex=True)
+        .replace({"NAN": "", "NONE": ""})
+    )
+    return s
+
+
+def coupon_usage_registration_mask(df: pd.DataFrame) -> pd.Series:
+    """True quando há cupom válido no mesmo critério do estudo analítico de cupons.
+
+    Código normalizado (somente A–Z/0–9) com comprimento ≥ 3 — ver uso em cupons por
+    categoria e `_coupon_code_normalized_alnum`.
+    """
+    norm = _coupon_code_normalized_alnum(df)
+    return norm.str.len().ge(3)
+
+
+def nubank_card_payment_registration_mask(df: pd.DataFrame) -> pd.Series:
+    """Pagamento com cartão Nubank (`nubank_flag` > 0), excluindo quem usou cupom na compra."""
+    if "nubank_flag" not in df.columns:
+        return pd.Series(False, index=df.index)
+    nb = pd.to_numeric(df["nubank_flag"], errors="coerce").fillna(0).gt(0)
+    return nb & ~coupon_usage_registration_mask(df)
 
 
 def sort_competitions(df: pd.DataFrame, col_name: str) -> pd.DataFrame:
@@ -1147,6 +1355,629 @@ def render_header(kpi_df: pd.DataFrame, data_base_label: str) -> None:
     y2.caption(f"BR: {format_int(bus_br)} | Estrangeiros: {format_int(bus_foreign)}")
 
 
+PT_WEEKDAYS = [
+    "Segunda-feira",
+    "Terça-feira",
+    "Quarta-feira",
+    "Quinta-feira",
+    "Sexta-feira",
+    "Sábado",
+    "Domingo",
+]
+
+
+def _resolve_reference_date(df: pd.DataFrame, ref_ts: pd.Timestamp | None) -> date:
+    """Determina a data de referência (preferindo o ts informado, depois max do df)."""
+    if ref_ts is not None and pd.notna(ref_ts):
+        return pd.Timestamp(ref_ts).date()
+    if "Registration date" in df.columns:
+        max_ts = pd.to_datetime(df["Registration date"], errors="coerce").max()
+        if pd.notna(max_ts):
+            return max_ts.date()
+    return date.today()
+
+
+def _filter_by_day(df: pd.DataFrame, day: date) -> pd.DataFrame:
+    if "Registration date" not in df.columns:
+        return df.iloc[0:0]
+    series = pd.to_datetime(df["Registration date"], errors="coerce").dt.date
+    return df.loc[series.eq(day)].copy()
+
+
+def _filter_by_window(df: pd.DataFrame, start: date, end: date) -> pd.DataFrame:
+    """Inclusivo nas duas pontas."""
+    if "Registration date" not in df.columns:
+        return df.iloc[0:0]
+    series = pd.to_datetime(df["Registration date"], errors="coerce").dt.date
+    return df.loc[series.between(start, end)].copy()
+
+
+def compute_daily_deltas(df: pd.DataFrame, ref_ts: pd.Timestamp | None = None) -> dict[str, float | int | str]:
+    """Compara o dia de referência (geralmente data base do dashboard) com o dia anterior."""
+    ref_day = _resolve_reference_date(df, ref_ts)
+    prev_day = ref_day - pd.Timedelta(days=1).to_pytimedelta()
+
+    today_df = _filter_by_day(df, ref_day)
+    yesterday_df = _filter_by_day(df, prev_day)
+
+    inscritos_hoje = int(len(today_df))
+    inscritos_ontem = int(len(yesterday_df))
+    delta_inscritos = inscritos_hoje - inscritos_ontem
+
+    receita_hoje = float(today_df["net_revenue_brl"].sum()) if "net_revenue_brl" in today_df.columns else 0.0
+    receita_ontem = float(yesterday_df["net_revenue_brl"].sum()) if "net_revenue_brl" in yesterday_df.columns else 0.0
+    delta_receita = receita_hoje - receita_ontem
+
+    weekday_idx = ref_day.weekday()
+    weekday_label = PT_WEEKDAYS[weekday_idx]
+
+    return {
+        "ref_day": ref_day,
+        "prev_day": prev_day,
+        "inscritos_hoje": inscritos_hoje,
+        "inscritos_ontem": inscritos_ontem,
+        "delta_inscritos": delta_inscritos,
+        "receita_hoje": receita_hoje,
+        "receita_ontem": receita_ontem,
+        "delta_receita": delta_receita,
+        "weekday_label": weekday_label,
+    }
+
+
+def compute_weekly_deltas(df: pd.DataFrame, ref_ts: pd.Timestamp | None = None) -> dict[str, object]:
+    """Compara semana corrente (segunda→domingo da ref) vs semana anterior."""
+    ref_day = _resolve_reference_date(df, ref_ts)
+    week_start = ref_day - pd.Timedelta(days=ref_day.weekday()).to_pytimedelta()
+    week_end = week_start + pd.Timedelta(days=6).to_pytimedelta()
+    prev_week_start = week_start - pd.Timedelta(days=7).to_pytimedelta()
+    prev_week_end = week_end - pd.Timedelta(days=7).to_pytimedelta()
+    iso_year, iso_week, _ = ref_day.isocalendar()
+
+    week_df = _filter_by_window(df, week_start, week_end)
+    prev_week_df = _filter_by_window(df, prev_week_start, prev_week_end)
+
+    inscritos_semana = int(len(week_df))
+    inscritos_semana_anterior = int(len(prev_week_df))
+    delta_inscritos_pct = (
+        ((inscritos_semana - inscritos_semana_anterior) / inscritos_semana_anterior * 100)
+        if inscritos_semana_anterior
+        else 0.0
+    )
+
+    receita_semana = float(week_df["net_revenue_brl"].sum()) if "net_revenue_brl" in week_df.columns else 0.0
+    receita_semana_anterior = (
+        float(prev_week_df["net_revenue_brl"].sum()) if "net_revenue_brl" in prev_week_df.columns else 0.0
+    )
+    delta_receita_pct = (
+        ((receita_semana - receita_semana_anterior) / receita_semana_anterior * 100)
+        if receita_semana_anterior
+        else 0.0
+    )
+
+    melhor_dia: dict[str, object] | None = None
+    pior_dia: dict[str, object] | None = None
+    if not week_df.empty and "Registration date" in week_df.columns:
+        per_day = (
+            week_df.assign(_day=pd.to_datetime(week_df["Registration date"], errors="coerce").dt.date)
+            .dropna(subset=["_day"])
+            .groupby("_day")
+            .size()
+            .rename("inscritos")
+            .reset_index()
+            .sort_values("inscritos", ascending=False)
+        )
+        if not per_day.empty:
+            top = per_day.iloc[0]
+            bottom = per_day.iloc[-1]
+            melhor_dia = {
+                "data": top["_day"],
+                "inscritos": int(top["inscritos"]),
+                "weekday": PT_WEEKDAYS[top["_day"].weekday()],
+            }
+            pior_dia = {
+                "data": bottom["_day"],
+                "inscritos": int(bottom["inscritos"]),
+                "weekday": PT_WEEKDAYS[bottom["_day"].weekday()],
+            }
+
+    return {
+        "ref_day": ref_day,
+        "week_start": week_start,
+        "week_end": week_end,
+        "prev_week_start": prev_week_start,
+        "prev_week_end": prev_week_end,
+        "iso_year": iso_year,
+        "iso_week": iso_week,
+        "inscritos_semana": inscritos_semana,
+        "inscritos_semana_anterior": inscritos_semana_anterior,
+        "delta_inscritos_pct": delta_inscritos_pct,
+        "receita_semana": receita_semana,
+        "receita_semana_anterior": receita_semana_anterior,
+        "delta_receita_pct": delta_receita_pct,
+        "melhor_dia": melhor_dia,
+        "pior_dia": pior_dia,
+        "week_df": week_df,
+        "prev_week_df": prev_week_df,
+    }
+
+
+def compute_marketing_highlights(
+    df: pd.DataFrame,
+    granularidade: str,
+    ref_ts: pd.Timestamp | None = None,
+    targets: dict[str, int] | None = None,
+) -> list[dict[str, str]]:
+    """Gera destaques automáticos: percurso em alta, cupom em alta, marco de meta.
+
+    `granularidade` ∈ {"diario", "semanal"} controla a janela de comparação.
+    """
+    targets = targets or {}
+    ref_day = _resolve_reference_date(df, ref_ts)
+    if granularidade == "diario":
+        current_start = current_end = ref_day
+        prev_start = prev_end = ref_day - pd.Timedelta(days=1).to_pytimedelta()
+        janela_label = "24h"
+    else:
+        current_start = ref_day - pd.Timedelta(days=ref_day.weekday()).to_pytimedelta()
+        current_end = current_start + pd.Timedelta(days=6).to_pytimedelta()
+        prev_start = current_start - pd.Timedelta(days=7).to_pytimedelta()
+        prev_end = current_end - pd.Timedelta(days=7).to_pytimedelta()
+        janela_label = "semana"
+
+    current_df = _filter_by_window(df, current_start, current_end)
+    prev_df = _filter_by_window(df, prev_start, prev_end)
+
+    highlights: list[dict[str, str]] = []
+
+    # Destaque 1 - percurso que mais cresceu na janela.
+    if "Competition" in current_df.columns:
+        cur_counts = current_df["Competition"].value_counts()
+        prev_counts = prev_df["Competition"].value_counts() if "Competition" in prev_df.columns else pd.Series(dtype=int)
+        crescimento = (cur_counts - prev_counts.reindex(cur_counts.index, fill_value=0)).sort_values(ascending=False)
+        if not crescimento.empty and crescimento.iloc[0] > 0:
+            top_percurso = crescimento.index[0]
+            highlights.append(
+                {
+                    "titulo": f"Percurso em alta ({janela_label})",
+                    "valor": f"{top_percurso}",
+                    "hint": f"+{int(crescimento.iloc[0])} inscritos vs período anterior",
+                }
+            )
+
+    # Destaque 2 - cupom mais usado na janela atual (>= 3 chars válidos).
+    if "coupon_code" in current_df.columns and not current_df.empty:
+        codes = current_df["coupon_code"].fillna("").astype(str).str.strip()
+        codes = codes[codes.str.len().ge(3)]
+        if not codes.empty:
+            top_coupon = codes.value_counts().head(1)
+            cupom_nome = str(top_coupon.index[0])
+            usos = int(top_coupon.iloc[0])
+            highlights.append(
+                {
+                    "titulo": f"Cupom em destaque ({janela_label})",
+                    "valor": cupom_nome,
+                    "hint": f"{usos} uso(s) na janela",
+                }
+            )
+
+    # Destaque 3 - percurso mais próximo / acima de 80% da meta acumulada.
+    if targets and "Competition" in df.columns:
+        accumulated = df["Competition"].value_counts()
+        progresso = []
+        for percurso, meta in targets.items():
+            if not meta:
+                continue
+            total = int(accumulated.get(percurso, 0))
+            pct = total / meta * 100
+            progresso.append((percurso, total, meta, pct))
+        progresso.sort(key=lambda row: row[3], reverse=True)
+        if progresso:
+            percurso, total, meta, pct = progresso[0]
+            highlights.append(
+                {
+                    "titulo": "Marco de meta",
+                    "valor": f"{percurso} em {pct:.0f}% da meta",
+                    "hint": f"{format_int(total)} de {format_int(meta)} inscritos",
+                }
+            )
+
+    return highlights[:3]
+
+
+def render_kpi_strip(items: list[dict[str, object]], *, columns: int | None = None) -> None:
+    """Faixa padronizada de st.metric. Cada item: {label, value, delta?, help?}."""
+    if not items:
+        return
+    n = columns or len(items)
+    cols = st.columns(n)
+    for idx, item in enumerate(items):
+        col = cols[idx % n]
+        col.metric(
+            label=str(item.get("label", "")),
+            value=str(item.get("value", "")),
+            delta=item.get("delta"),
+            help=item.get("help"),
+        )
+
+
+def inject_marketing_report_styles() -> None:
+    """CSS compartilhado apenas nas visões Marketing Diário / Semanal (cards KPI responsivos)."""
+    st.markdown(
+        """
+        <style>
+        :root {
+          --mkt-navy: #0b2447;
+          --mkt-navy-mid: #19376d;
+          --mkt-accent: #576cbc;
+          --mkt-surface: #ffffff;
+          --mkt-border: #e2e8f0;
+          --mkt-muted: #64748b;
+          --mkt-text: #1e293b;
+        }
+        .mkt-kpi-wrap {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 12px;
+          margin: 8px 0 18px 0;
+          align-items: stretch;
+        }
+        .mkt-kpi-card {
+          flex: 1 1 148px;
+          min-width: min(168px, 100%);
+          max-width: 100%;
+          box-sizing: border-box;
+          background: var(--mkt-surface);
+          border: 1px solid var(--mkt-border);
+          border-radius: 12px;
+          padding: 14px 16px;
+          border-left: 4px solid var(--mkt-navy);
+          box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
+        }
+        .mkt-kpi-label {
+          font-family: Inter, system-ui, sans-serif;
+          font-size: 0.78rem;
+          font-weight: 600;
+          color: var(--mkt-muted);
+          text-transform: uppercase;
+          letter-spacing: 0.04em;
+          line-height: 1.35;
+          word-wrap: break-word;
+          overflow-wrap: anywhere;
+          white-space: normal;
+          hyphens: auto;
+        }
+        .mkt-kpi-value {
+          font-family: Inter, system-ui, sans-serif;
+          font-size: 1.32rem;
+          font-weight: 700;
+          color: var(--mkt-text);
+          margin-top: 6px;
+          line-height: 1.28;
+          word-wrap: break-word;
+          overflow-wrap: anywhere;
+          white-space: normal;
+        }
+        .mkt-kpi-delta {
+          font-family: Inter, system-ui, sans-serif;
+          font-size: 0.82rem;
+          color: #475569;
+          margin-top: 6px;
+          line-height: 1.35;
+          word-wrap: break-word;
+          overflow-wrap: anywhere;
+          white-space: normal;
+        }
+        .mkt-section-title {
+          font-family: Inter, system-ui, sans-serif;
+          font-size: 1.05rem;
+          font-weight: 700;
+          color: var(--mkt-navy);
+          margin: 1.1rem 0 0.4rem 0;
+          letter-spacing: -0.01em;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_marketing_kpi_cards(items: list[dict[str, object]]) -> None:
+    """KPIs em cartões flexíveis (sem truncagem agressiva de rótulos do st.metric)."""
+    if not items:
+        return
+    parts: list[str] = ['<div class="mkt-kpi-wrap">']
+    for item in items:
+        label = html.escape(str(item.get("label", "")))
+        value = html.escape(str(item.get("value", "")))
+        help_txt = item.get("help")
+        title_attr = f' title="{html.escape(str(help_txt))}"' if help_txt else ""
+        parts.append(f'<div class="mkt-kpi-card"{title_attr}>')
+        parts.append(f'<div class="mkt-kpi-label">{label}</div>')
+        parts.append(f'<div class="mkt-kpi-value">{value}</div>')
+        delta = item.get("delta")
+        if delta is not None:
+            parts.append(f'<div class="mkt-kpi-delta">{html.escape(str(delta))}</div>')
+        parts.append("</div>")
+    parts.append("</div>")
+    st.markdown("".join(parts), unsafe_allow_html=True)
+
+
+def _route_pct_meta_color(pct: float) -> str:
+    if pct >= 100:
+        return BRAND_COLORWAY[6]
+    if pct >= 70:
+        return BRAND_COLORWAY[4]
+    return BRAND_COLORWAY[2]
+
+
+def build_weekly_metas_bullet_figure(summary: pd.DataFrame) -> go.Figure:
+    """Barras horizontais sobrepostas: meta (fundo) vs inscritos (frente), por percurso."""
+    order_with_total = list(PERCURSO_ORDER) + ["TOTAL"]
+    chart_df = summary.copy()
+    chart_df["Percurso"] = pd.Categorical(
+        chart_df["Percurso"],
+        categories=order_with_total,
+        ordered=True,
+    )
+    chart_df = chart_df.sort_values("Percurso").reset_index(drop=True)
+    colors = [_route_pct_meta_color(float(r["pct_meta"])) for _, r in chart_df.iterrows()]
+    xmax_raw = max(float(chart_df["meta"].max()), float(chart_df["inscritos"].max()), 1.0)
+    # Extra horizontal room so a single outside inscritos label ("n (x,x%)") never grazes the axis edge.
+    xmax = xmax_raw * 1.32
+
+    def _inscritos_bar_label(row: pd.Series) -> str:
+        """Um único rótulo fora da barra azul; contagem e % também no hover."""
+        ins = float(row["inscritos"])
+        pct = float(row["pct_meta"])
+        return f"{format_int(ins)} ({format_pct(pct)})"
+
+    ins_labels = [_inscritos_bar_label(r) for _, r in chart_df.iterrows()]
+
+    fig = go.Figure()
+    fig.add_trace(
+        go.Bar(
+            y=chart_df["Percurso"],
+            x=chart_df["meta"],
+            orientation="h",
+            name="Meta",
+            marker_color="rgba(226, 232, 240, 0.92)",
+            text=[format_int(m) for m in chart_df["meta"]],
+            textposition="inside",
+            # Âncora à esquerda do cinza: não compete com o rótulo externo no fim da barra azul.
+            insidetextanchor="start",
+            insidetextfont=dict(color="#64748b", size=10),
+            constraintext="both",
+            hovertemplate="%{y}<br>Meta: %{x}<extra></extra>",
+        )
+    )
+    fig.add_trace(
+        go.Bar(
+            y=chart_df["Percurso"],
+            x=chart_df["inscritos"],
+            orientation="h",
+            name="Inscritos",
+            marker_color=colors,
+            text=ins_labels,
+            textposition="outside",
+            cliponaxis=False,
+            outsidetextfont=dict(color="#334155", size=10),
+            constraintext="both",
+            customdata=chart_df["pct_meta"],
+            hovertemplate="%{y}<br>Inscritos: %{x}<br>% da meta: %{customdata:.1f}%<extra></extra>",
+        )
+    )
+    fig.update_layout(
+        title="Metas por percurso — inscritos vs meta",
+        barmode="overlay",
+        height=max(340, 52 * len(chart_df)),
+        uniformtext_minsize=9,
+        uniformtext_mode="hide",
+    )
+    fig.update_xaxes(title="Quantidade", range=[0, xmax])
+    fig.update_yaxes(autorange="reversed", title="")
+    apply_brand_chart_style(fig)
+    fig.update_layout(
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1,
+            bgcolor="rgba(255,255,255,0.92)",
+        ),
+        margin=dict(l=16, r=56, t=56, b=48),
+    )
+    return fig
+
+
+def build_weekly_ma_projection_figure(
+    series: pd.DataFrame,
+    cumulative_inscritos: int,
+    end_date: date,
+    *,
+    ma_specs: tuple[tuple[str, str, str], ...] = (
+        ("mm7", "MM 7d", BRAND_COLORWAY[0]),
+        ("mm15", "MM 15d", BRAND_COLORWAY[1]),
+        ("mm30", "MM 30d", BRAND_COLORWAY[6]),
+    ),
+) -> tuple[go.Figure, dict[str, int]]:
+    """Duplo painel: barras diárias + médias móveis com legenda contendo projeção linear ao fim do período."""
+    last_day = series["day"].iloc[-1]
+    days_left = max((end_date - last_day).days, 0)
+    projections: dict[str, int] = {}
+
+    fig = make_subplots(
+        rows=2,
+        cols=1,
+        row_heights=[0.44, 0.56],
+        vertical_spacing=0.20,
+        subplot_titles=(
+            "Inscrições por dia",
+            "Médias móveis (escala própria — ver legenda para projeção ao fim da campanha)",
+        ),
+    )
+    fig.add_trace(
+        go.Bar(
+            x=series["day"],
+            y=series["inscricoes_diarias"],
+            name="Inscrições/dia",
+            marker_color=BRAND_COLORWAY[3],
+            opacity=0.85,
+        ),
+        row=1,
+        col=1,
+    )
+
+    for col_name, label_base, color in ma_specs:
+        last_rate = series[col_name].iloc[-1]
+        if pd.isna(last_rate):
+            last_rate = 0.0
+        proj_total = int(round(cumulative_inscritos + float(last_rate) * days_left))
+        projections[col_name] = proj_total
+        legend_label = f"{label_base} → projeção fim: {format_int(proj_total)}"
+        fig.add_trace(
+            go.Scatter(
+                x=series["day"],
+                y=series[col_name],
+                name=legend_label,
+                mode="lines+markers",
+                line=dict(color=color, width=2.6),
+                marker=dict(size=5),
+                hovertemplate=(
+                    f"{label_base}<br>"
+                    + "Data: %{x}<br>"
+                    + "Média: %{y:.2f}/dia<br>"
+                    + f"Dias restantes (até fim campanha): {days_left}<br>"
+                    + f"Projeção total inscritos: {format_int(proj_total)}"
+                    + "<extra></extra>"
+                ),
+            ),
+            row=2,
+            col=1,
+        )
+
+    fig.update_xaxes(matches="x")
+    fig.update_layout(
+        height=500,
+        legend=dict(orientation="h", yanchor="bottom", y=-0.14, xanchor="center", x=0.5),
+        margin=dict(t=12, b=108, l=10, r=10),
+    )
+    fig.update_yaxes(title="Inscrições", row=1, col=1)
+    fig.update_yaxes(title="Média móvel (por dia)", row=2, col=1)
+    apply_brand_chart_style(fig)
+    fig.update_layout(
+        title=None,
+        margin=dict(t=64, b=118, l=10, r=10),
+        legend=dict(orientation="h", yanchor="bottom", y=-0.12, xanchor="center", x=0.5),
+    )
+    return fig, projections
+
+
+def build_marketing_gauges_grid_figure(df: pd.DataFrame, targets: dict[str, int]) -> go.Figure:
+    """Barras horizontais compactas (meta vs inscritos), TOTAL + percursos + Óculos Yopp — Marketing Semanal."""
+    summary = build_route_summary(df, targets)
+    gauge_order = ["TOTAL"] + list(PERCURSO_ORDER)
+    gauge_df = summary.copy()
+    gauge_df["Percurso"] = pd.Categorical(gauge_df["Percurso"], categories=gauge_order, ordered=True)
+    gauge_df = gauge_df.sort_values("Percurso").reset_index(drop=True)
+
+    rows_list: list[dict[str, object]] = []
+    for _, row in gauge_df.iterrows():
+        rows_list.append(
+            {
+                "Categoria": str(row["Percurso"]),
+                "value": float(row["inscritos"]),
+                "meta": float(row["meta"]),
+                "pct": float(row["pct_meta"]),
+            }
+        )
+
+    yopp_total = float(int(df["yopp_flag"].sum())) if "yopp_flag" in df.columns else 0.0
+    yopp_meta = 300.0
+    rows_list.append(
+        {
+            "Categoria": "Óculos Yopp",
+            "value": yopp_total,
+            "meta": yopp_meta,
+            "pct": (yopp_total / yopp_meta * 100) if yopp_meta else 0.0,
+        }
+    )
+
+    chart_df = pd.DataFrame(rows_list)
+    xmax = max(float(chart_df["meta"].max()), float(chart_df["value"].max()), 1.0) * 1.22
+    colors = [_route_pct_meta_color(float(p)) for p in chart_df["pct"]]
+
+    def _row_outside_label(row: pd.Series, x_max: float) -> str:
+        ins = float(row["value"])
+        meta_v = float(row["meta"])
+        pct = float(row["pct"])
+        near_goal = meta_v > 0 and ins >= meta_v * 0.88
+        thin = x_max > 0 and ins / x_max < 0.06
+        if near_goal or thin:
+            return format_pct(pct)
+        return f"{format_int(ins)} · {format_pct(pct)}"
+
+    ins_labels = [_row_outside_label(r, xmax) for _, r in chart_df.iterrows()]
+    meta_x = chart_df["meta"].clip(lower=0)
+
+    fig = go.Figure()
+    fig.add_trace(
+        go.Bar(
+            y=chart_df["Categoria"],
+            x=meta_x,
+            orientation="h",
+            name="Meta",
+            marker_color="rgba(226, 232, 240, 0.92)",
+            text=[format_int(m) for m in meta_x],
+            textposition="inside",
+            insidetextanchor="end",
+            insidetextfont=dict(color="#64748b", size=10),
+            hovertemplate="%{y}<br>Meta: %{x:,.0f}<extra></extra>",
+        )
+    )
+    fig.add_trace(
+        go.Bar(
+            y=chart_df["Categoria"],
+            x=chart_df["value"],
+            orientation="h",
+            name="Inscritos / vendidos",
+            marker_color=colors,
+            text=ins_labels,
+            textposition="outside",
+            cliponaxis=False,
+            outsidetextfont=dict(color="#334155", size=11),
+            customdata=chart_df["pct"],
+            hovertemplate=(
+                "%{y}<br>Valor: %{x:,.0f}<br>% da meta: %{customdata:.1f}%<extra></extra>"
+            ),
+        )
+    )
+    n_rows = len(chart_df)
+    fig.update_layout(
+        title="Metas — desempenho vs meta (TOTAL, percursos e Yopp)",
+        barmode="overlay",
+        height=max(280, 44 * n_rows),
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1,
+            bgcolor="rgba(255,255,255,0.92)",
+        ),
+        margin=dict(l=14, r=120, t=56, b=48),
+    )
+    fig.update_xaxes(title="Quantidade", range=[0, xmax])
+    fig.update_yaxes(autorange="reversed", title="", tickfont=dict(size=12))
+    apply_brand_chart_style(fig)
+    return fig
+
+
+def render_section_caption(text: str) -> None:
+    """Microcopy padrão abaixo de st.header explicando o porquê do bloco."""
+    st.caption(text)
+
+
 def render_header_marketing(kpi_df: pd.DataFrame, data_base_label: str) -> None:
     total = len(kpi_df)
     female = count_female_entries(kpi_df)
@@ -1186,6 +2017,555 @@ def render_header_marketing(kpi_df: pd.DataFrame, data_base_label: str) -> None:
     y2.caption(
         f"% dos inscritos: {format_pct(bus_pct)} | BR: {format_int(bus_br)} | Estrangeiros: {format_int(bus_foreign)}"
     )
+
+
+def _render_report_hero(badge: str, badge_color: str, title: str, subtitle: str) -> None:
+    """Hero unificado para Diário/Semanal com badge de tipo e subtítulo padronizado."""
+    st.markdown(
+        f"""
+        <div class="hero hero-report">
+          <div class="hero-row">
+            <span class="hero-badge" style="background:{badge_color};">{badge}</span>
+            <div class="hero-text">
+              <h2 style="margin:0;">{title}</h2>
+              <p class="subtle" style="color:#cbd5e1;margin:4px 0 0 0;">{subtitle}</p>
+            </div>
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _render_pdf_button(label: str, key: str) -> None:
+    """Botão dedicado de export para PDF (usa janela de impressão do navegador)."""
+    if st.button(label, key=key, use_container_width=True):
+        components.html("<script>window.print();</script>", height=0, width=0)
+
+
+def _build_pace_chart(df: pd.DataFrame, days_window: int = 14, ma_window: int = 7) -> go.Figure | None:
+    """Linha + média móvel para os últimos N dias de inscrições. None se não houver datas."""
+    if "Registration date" not in df.columns:
+        return None
+    series = pd.to_datetime(df["Registration date"], errors="coerce")
+    valid_df = df.assign(_day=series.dt.date).dropna(subset=["_day"])
+    if valid_df.empty:
+        return None
+
+    max_day = max(valid_df["_day"])
+    start_day = max_day - pd.Timedelta(days=days_window - 1).to_pytimedelta()
+    daily = (
+        valid_df[valid_df["_day"].between(start_day, max_day)]
+        .groupby("_day")
+        .size()
+        .rename("inscritos")
+        .reset_index()
+        .sort_values("_day")
+    )
+
+    full_index = pd.date_range(start=start_day, end=max_day, freq="D").date
+    daily_full = (
+        pd.DataFrame({"_day": full_index})
+        .merge(daily, on="_day", how="left")
+        .fillna({"inscritos": 0})
+    )
+    daily_full["mm"] = daily_full["inscritos"].rolling(window=ma_window, min_periods=1).mean()
+
+    fig = go.Figure()
+    fig.add_trace(
+        go.Bar(
+            x=daily_full["_day"],
+            y=daily_full["inscritos"],
+            name="Inscritos/dia",
+            marker_color=BRAND_COLORWAY[2],
+        )
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=daily_full["_day"],
+            y=daily_full["mm"],
+            name=f"Média móvel ({ma_window}d)",
+            mode="lines+markers",
+            line=dict(color=BRAND_COLORWAY[0], width=3),
+            marker=dict(size=6),
+        )
+    )
+    fig.update_layout(title=f"Ritmo de vendas — últimos {days_window} dias", height=240)
+    apply_brand_chart_style(fig)
+    return fig
+
+
+def _build_route_progress_bars(summary: pd.DataFrame) -> go.Figure:
+    """Barras horizontais com % de meta por percurso (sem TOTAL)."""
+    chart_df = summary[summary["Percurso"] != "TOTAL"].copy()
+    chart_df["pct_cap"] = chart_df["pct_meta"].clip(lower=0, upper=120)
+    chart_df["color"] = chart_df["pct_meta"].apply(
+        lambda pct: BRAND_COLORWAY[6] if pct >= 100 else (BRAND_COLORWAY[4] if pct >= 70 else BRAND_COLORWAY[2])
+    )
+    chart_df["label"] = chart_df.apply(
+        lambda row: f"{format_int(row['inscritos'])} / {format_int(row['meta'])}  ({row['pct_meta']:.0f}%)",
+        axis=1,
+    )
+
+    fig = go.Figure()
+    fig.add_trace(
+        go.Bar(
+            x=chart_df["pct_cap"],
+            y=chart_df["Percurso"],
+            orientation="h",
+            text=chart_df["label"],
+            textposition="outside",
+            marker=dict(color=chart_df["color"]),
+        )
+    )
+    fig.add_vline(x=100, line_color="#94a3b8", line_dash="dash", line_width=1)
+    fig.update_layout(
+        title="Progresso por percurso (% da meta)",
+        xaxis=dict(range=[0, 130], ticksuffix="%"),
+        yaxis=dict(autorange="reversed"),
+        height=320,
+        showlegend=False,
+    )
+    apply_brand_chart_style(fig)
+    return fig
+
+
+def render_marketing_highlights(highlights: list[dict[str, str]]) -> None:
+    """Faixa de cards horizontais com os principais destaques."""
+    if not highlights:
+        st.caption("Sem destaques relevantes para esta janela.")
+        return
+    cols = st.columns(len(highlights))
+    for col, item in zip(cols, highlights):
+        col.markdown(
+            f"""
+            <div class="highlight-card">
+              <div class="highlight-title">{item.get('titulo', '')}</div>
+              <div class="highlight-value">{item.get('valor', '')}</div>
+              <div class="highlight-hint">{item.get('hint', '')}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+
+def render_marketing_diario(
+    scoped: pd.DataFrame,
+    full_df: pd.DataFrame,
+    percurso_targets: dict[str, int],
+    data_base_label: str,
+    data_base_ts: pd.Timestamp | None = None,
+) -> None:
+    """Visão executiva diária — KPIs essenciais + ritmo + 3 destaques + PDF dedicado."""
+    inject_marketing_report_styles()
+    deltas = compute_daily_deltas(scoped, data_base_ts)
+    ref_day: date = deltas["ref_day"]  # type: ignore[assignment]
+    weekday_label = deltas["weekday_label"]
+    title = "Marketing Diário — Paraty Brazil by UTMB"
+    subtitle = (
+        f"{weekday_label}, {ref_day.strftime('%d/%m/%Y')} | "
+        f"Base atualizada até {data_base_label}"
+    )
+    _render_report_hero(badge="DIÁRIO", badge_color=BRAND_COLORWAY[0], title=title, subtitle=subtitle)
+
+    with st.container():
+        button_col_left, button_col_right = st.columns([3, 1])
+        with button_col_left:
+            st.caption(
+                "Visão de 1 página com inscritos, ritmo e progresso de metas — pensada para checagem rápida e envio."
+            )
+        with button_col_right:
+            _render_pdf_button("Baixar PDF do Diário", key="pdf_marketing_diario")
+
+    total_inscritos = int(len(scoped))
+    receita_total = float(scoped["net_revenue_brl"].sum()) if "net_revenue_brl" in scoped.columns else 0.0
+    female = count_female_entries(scoped)
+    pct_female = (female / total_inscritos * 100) if total_inscritos else 0
+    foreigners = (
+        scoped[scoped["nationality_std"] != "BR"].shape[0] if "nationality_std" in scoped.columns else 0
+    )
+    pct_foreigners = (foreigners / total_inscritos * 100) if total_inscritos else 0
+    summary = build_route_summary(scoped, percurso_targets)
+    total_row = summary[summary["Percurso"] == "TOTAL"].iloc[0] if not summary.empty else None
+    pct_meta_total = float(total_row["pct_meta"]) if total_row is not None else 0.0
+
+    delta_inscritos = int(deltas["delta_inscritos"])  # type: ignore[arg-type]
+    delta_receita = float(deltas["delta_receita"])  # type: ignore[arg-type]
+    inscritos_hoje = int(deltas["inscritos_hoje"])  # type: ignore[arg-type]
+    receita_hoje = float(deltas["receita_hoje"])  # type: ignore[arg-type]
+
+    render_marketing_kpi_cards(
+        [
+            {
+                "label": "Inscritos hoje",
+                "value": format_int(inscritos_hoje),
+                "delta": f"{delta_inscritos:+d} vs ontem",
+            },
+            {"label": "Inscritos total", "value": format_int(total_inscritos)},
+            {
+                "label": "% meta total",
+                "value": format_pct(pct_meta_total),
+                "help": "Inscritos atuais ÷ soma das metas por percurso.",
+            },
+            {
+                "label": "Receita líquida hoje",
+                "value": format_currency(receita_hoje),
+                "delta": f"{delta_receita:+,.0f}".replace(",", ".") + " R$ vs ontem",
+            },
+            {"label": "Receita líquida total", "value": format_currency(receita_total)},
+            {"label": "% mulheres", "value": format_pct(pct_female)},
+            {"label": "% estrangeiros", "value": format_pct(pct_foreigners)},
+            {
+                "label": "Δ ontem",
+                "value": f"{delta_inscritos:+d}",
+                "help": "Variação absoluta de inscritos hoje vs ontem.",
+            },
+        ]
+    )
+
+    st.markdown("---")
+    chart_col, hl_col = st.columns([3, 2])
+    with chart_col:
+        progress_fig = _build_route_progress_bars(summary)
+        st.plotly_chart(progress_fig, use_container_width=True)
+        pace_fig = _build_pace_chart(scoped)
+        if pace_fig is not None:
+            st.plotly_chart(pace_fig, use_container_width=True)
+        else:
+            st.info("Sem datas válidas para montar o gráfico de ritmo dos últimos 14 dias.")
+    with hl_col:
+        st.markdown('<div class="mkt-section-title">Destaques do dia</div>', unsafe_allow_html=True)
+        highlights = compute_marketing_highlights(
+            scoped, granularidade="diario", ref_ts=data_base_ts, targets=percurso_targets
+        )
+        if highlights:
+            for item in highlights:
+                st.markdown(
+                    f"""
+                    <div class="highlight-card">
+                      <div class="highlight-title">{item.get('titulo', '')}</div>
+                      <div class="highlight-value">{item.get('valor', '')}</div>
+                      <div class="highlight-hint">{item.get('hint', '')}</div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+        else:
+            st.caption("Sem destaques relevantes nas últimas 24h.")
+
+
+def render_marketing_semanal(
+    scoped: pd.DataFrame,
+    full_df: pd.DataFrame,
+    percurso_targets: dict[str, int],
+    start_date: date,
+    end_date: date,
+    data_base_label: str,
+    data_base_ts: pd.Timestamp | None,
+    ibge_df: pd.DataFrame,
+    print_mode: bool,
+) -> None:
+    """Relatório executivo semanal — para envio toda segunda de manhã."""
+    inject_marketing_report_styles()
+    weekly = compute_weekly_deltas(scoped, data_base_ts)
+    week_start: date = weekly["week_start"]  # type: ignore[assignment]
+    week_end: date = weekly["week_end"]  # type: ignore[assignment]
+    iso_year = weekly["iso_year"]
+    iso_week = weekly["iso_week"]
+
+    badge = f"SEMANA {iso_week:02d}/{iso_year}"
+    title = "Marketing Semanal — Paraty Brazil by UTMB"
+    subtitle = (
+        f"Período: {week_start.strftime('%d/%m')} a {week_end.strftime('%d/%m/%Y')} | "
+        f"Base atualizada até {data_base_label}"
+    )
+    _render_report_hero(badge=badge, badge_color=BRAND_COLORWAY[1], title=title, subtitle=subtitle)
+
+    with st.container():
+        button_col_left, button_col_right = st.columns([3, 1])
+        with button_col_left:
+            st.caption(
+                "Relatório completo da semana com KPIs, ritmo, destaques e blocos analíticos — "
+                "pronto para envio toda segunda."
+            )
+        with button_col_right:
+            _render_pdf_button("Baixar PDF do Semanal", key="pdf_marketing_semanal")
+
+    inscritos_semana = int(weekly["inscritos_semana"])  # type: ignore[arg-type]
+    inscritos_ant = int(weekly["inscritos_semana_anterior"])  # type: ignore[arg-type]
+    delta_inscritos_pct = float(weekly["delta_inscritos_pct"])  # type: ignore[arg-type]
+    receita_semana = float(weekly["receita_semana"])  # type: ignore[arg-type]
+    receita_ant = float(weekly["receita_semana_anterior"])  # type: ignore[arg-type]
+    delta_receita_pct = float(weekly["delta_receita_pct"])  # type: ignore[arg-type]
+
+    week_df_obj = weekly.get("week_df")
+    week_df = week_df_obj if isinstance(week_df_obj, pd.DataFrame) else scoped.iloc[0:0]
+
+    total_inscritos = int(len(scoped))
+    summary = build_route_summary(scoped, percurso_targets)
+    total_row = summary[summary["Percurso"] == "TOTAL"].iloc[0] if not summary.empty else None
+    pct_meta_total = float(total_row["pct_meta"]) if total_row is not None else 0.0
+    female = count_female_entries(scoped)
+    pct_female = (female / total_inscritos * 100) if total_inscritos else 0
+    foreigners = (
+        scoped[scoped["nationality_std"] != "BR"].shape[0] if "nationality_std" in scoped.columns else 0
+    )
+    pct_foreigners = (foreigners / total_inscritos * 100) if total_inscritos else 0
+    coupon_share = (
+        int(scoped["total_discounts_brl"].gt(0).sum()) / total_inscritos * 100
+        if total_inscritos and "total_discounts_brl" in scoped.columns
+        else 0.0
+    )
+
+    def _flag_count(frame: pd.DataFrame, col: str) -> int:
+        if col not in frame.columns:
+            return 0
+        return int(pd.to_numeric(frame[col], errors="coerce").fillna(0).gt(0).sum())
+
+    def _nubank_card_payment_count(frame: pd.DataFrame) -> int:
+        if frame is None or getattr(frame, "empty", True):
+            return 0
+        return int(nubank_card_payment_registration_mask(frame).sum())
+
+    yopp_semana = _flag_count(week_df, "yopp_flag")
+    yopp_acumulado = _flag_count(scoped, "yopp_flag")
+    nubank_semana = _nubank_card_payment_count(week_df)
+    nubank_acumulado = _nubank_card_payment_count(scoped)
+    # "Interessados no ônibus oficial" = opt-in detectado em coluna de transporte/ônibus
+    # (ver detect_official_bus_column + parse_opt_in_series → flag official_bus_flag).
+    bus_semana = _flag_count(week_df, "official_bus_flag")
+    bus_acumulado = _flag_count(scoped, "official_bus_flag")
+
+    if "country_std" in scoped.columns:
+        paises_acumulado = int(
+            scoped["country_std"]
+            .replace({"": pd.NA, "NAN": pd.NA})
+            .dropna()
+            .nunique()
+        )
+    else:
+        paises_acumulado = 0
+
+    render_marketing_kpi_cards(
+        [
+            {
+                "label": "Inscritos na semana",
+                "value": format_int(inscritos_semana),
+                "delta": f"{delta_inscritos_pct:+.1f}% vs semana anterior",
+                "help": f"Anterior: {format_int(inscritos_ant)} inscritos.",
+            },
+            {"label": "% meta total", "value": format_pct(pct_meta_total)},
+            {
+                "label": "Óculos Yopp vendidos (semana)",
+                "value": format_int(yopp_semana),
+                "delta": f"Acumulado: {format_int(yopp_acumulado)}",
+                "help": "Inscrições com flag Yopp marcada (yopp_flag) registradas na semana corrente.",
+            },
+            {
+                "label": "Pagamentos cartão Nubank (semana)",
+                "value": format_int(nubank_semana),
+                "delta": f"Acumulado: {format_int(nubank_acumulado)}",
+                "help": "nubank_flag ativo e sem cupom válido (código ≥3 caracteres alfanuméricos normalizado). Exclui compras com cupom.",
+            },
+            {
+                "label": "Interessados no ônibus oficial (semana)",
+                "value": format_int(bus_semana),
+                "delta": f"Acumulado: {format_int(bus_acumulado)}",
+                "help": "Opt-in na coluna de transporte/ônibus oficial (official_bus_flag).",
+            },
+            {
+                "label": "Países diferentes (acumulado)",
+                "value": format_int(paises_acumulado),
+                "help": "Países distintos entre todos os inscritos (campo Country).",
+            },
+            {"label": "% mulheres (acumulado)", "value": format_pct(pct_female)},
+            {"label": "% estrangeiros (acumulado)", "value": format_pct(pct_foreigners)},
+            {
+                "label": "% c/ cupom (acumulado)",
+                "value": format_pct(coupon_share),
+                "help": "Inscrições com qualquer desconto aplicado.",
+            },
+        ]
+    )
+
+    st.markdown('<div class="mkt-section-title">Destaques da semana</div>', unsafe_allow_html=True)
+    weekly_highlights = compute_marketing_highlights(
+        scoped, granularidade="semanal", ref_ts=data_base_ts, targets=percurso_targets
+    )
+    melhor = weekly.get("melhor_dia")
+    pior = weekly.get("pior_dia")
+    if isinstance(melhor, dict):
+        weekly_highlights.append(
+            {
+                "titulo": "Melhor dia da semana",
+                "valor": f"{melhor['weekday']} ({melhor['data'].strftime('%d/%m')})",
+                "hint": f"{format_int(int(melhor['inscritos']))} inscritos",
+            }
+        )
+    if isinstance(pior, dict):
+        weekly_highlights.append(
+            {
+                "titulo": "Dia mais fraco",
+                "valor": f"{pior['weekday']} ({pior['data'].strftime('%d/%m')})",
+                "hint": f"{format_int(int(pior['inscritos']))} inscritos",
+            }
+        )
+    render_marketing_highlights(weekly_highlights[:5])
+
+    insert_print_break(print_mode)
+    render_progress_projection(
+        scoped, percurso_targets, start_date, end_date, weekly_polish=True
+    )
+    render_marketing_target_gauges(scoped, percurso_targets, weekly_polish=True)
+    insert_print_break(print_mode)
+    render_demography(scoped, expandido=True)
+    render_geography(scoped, ibge_df)
+    render_international(scoped)
+    insert_print_break(print_mode)
+    render_marketing_coupon_block(scoped)
+    render_team_medical_company(scoped)
+
+    insert_print_break(print_mode)
+    st.header("Comparativo: semana atual vs semana anterior")
+    st.caption(
+        f"Janela atual: {week_start.strftime('%d/%m')} a {week_end.strftime('%d/%m')} | "
+        f"Janela anterior: {weekly['prev_week_start'].strftime('%d/%m')} a {weekly['prev_week_end'].strftime('%d/%m')}"
+    )
+    comparativo_df = pd.DataFrame(
+        [
+            {
+                "Métrica": "Inscritos",
+                "Semana atual": inscritos_semana,
+                "Semana anterior": inscritos_ant,
+                "Δ %": delta_inscritos_pct,
+            },
+            {
+                "Métrica": "Receita líquida (R$)",
+                "Semana atual": receita_semana,
+                "Semana anterior": receita_ant,
+                "Δ %": delta_receita_pct,
+            },
+        ]
+    )
+    comparativo_view = comparativo_df.copy()
+    comparativo_view["Semana atual"] = comparativo_view.apply(
+        lambda row: format_currency(row["Semana atual"]) if "Receita" in row["Métrica"] else format_int(row["Semana atual"]),
+        axis=1,
+    )
+    comparativo_view["Semana anterior"] = comparativo_view.apply(
+        lambda row: format_currency(row["Semana anterior"]) if "Receita" in row["Métrica"] else format_int(row["Semana anterior"]),
+        axis=1,
+    )
+    comparativo_view["Δ %"] = comparativo_view["Δ %"].map(lambda v: f"{v:+.1f}%")
+    st.dataframe(comparativo_view, hide_index=True, use_container_width=True)
+
+    max_insc_pair = max(float(inscritos_ant), float(inscritos_semana), 1.0)
+    col_insc_ant = BRAND_COLORWAY[3]
+    col_insc_cur = BRAND_COLORWAY[0]
+    fig_insc = go.Figure()
+    fig_insc.add_trace(
+        go.Bar(
+            name="Semana anterior",
+            x=["Inscritos"],
+            y=[inscritos_ant],
+            marker_color=col_insc_ant,
+            text=[format_int(inscritos_ant)],
+            textposition=_weekly_compare_textposition(inscritos_ant, max_insc_pair),
+            insidetextfont=dict(color=_inside_bar_label_color(col_insc_ant), size=12),
+            outsidetextfont=dict(color="#334155", size=12),
+        )
+    )
+    fig_insc.add_trace(
+        go.Bar(
+            name="Semana atual",
+            x=["Inscritos"],
+            y=[inscritos_semana],
+            marker_color=col_insc_cur,
+            text=[format_int(inscritos_semana)],
+            textposition=_weekly_compare_textposition(inscritos_semana, max_insc_pair),
+            insidetextfont=dict(color=_inside_bar_label_color(col_insc_cur), size=12),
+            outsidetextfont=dict(color="#334155", size=12),
+        )
+    )
+    fig_insc.update_layout(
+        barmode="group",
+        title="Inscritos — semana atual vs anterior",
+        height=340,
+        yaxis_title="Inscritos",
+        showlegend=True,
+    )
+    apply_brand_chart_style(fig_insc)
+    fig_insc.update_layout(
+        title=dict(text="Inscritos — semana atual vs anterior", x=0.5, xanchor="center"),
+        showlegend=True,
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.07,
+            x=0.5,
+            xanchor="center",
+            bgcolor="rgba(255,255,255,0.92)",
+            bordercolor="#e5e7eb",
+            borderwidth=1,
+        ),
+        margin=dict(t=96, b=48, l=10, r=10),
+    )
+    _polish_weekly_compare_bar_figure(fig_insc)
+    st.plotly_chart(fig_insc, use_container_width=True)
+
+    max_rec_pair = max(float(receita_ant), float(receita_semana), 1.0)
+    col_rec_ant = BRAND_COLORWAY[3]
+    col_rec_cur = BRAND_COLORWAY[1]
+    fig_rec = go.Figure()
+    fig_rec.add_trace(
+        go.Bar(
+            name="Semana anterior",
+            x=["Receita líquida (R$)"],
+            y=[receita_ant],
+            marker_color=col_rec_ant,
+            text=[format_currency(receita_ant)],
+            textposition=_weekly_compare_textposition(receita_ant, max_rec_pair),
+            insidetextfont=dict(color=_inside_bar_label_color(col_rec_ant), size=11),
+            outsidetextfont=dict(color="#334155", size=11),
+        )
+    )
+    fig_rec.add_trace(
+        go.Bar(
+            name="Semana atual",
+            x=["Receita líquida (R$)"],
+            y=[receita_semana],
+            marker_color=col_rec_cur,
+            text=[format_currency(receita_semana)],
+            textposition=_weekly_compare_textposition(receita_semana, max_rec_pair),
+            insidetextfont=dict(color=_inside_bar_label_color(col_rec_cur), size=11),
+            outsidetextfont=dict(color="#334155", size=11),
+        )
+    )
+    fig_rec.update_layout(
+        barmode="group",
+        title="Receita líquida (R$) — semana atual vs anterior",
+        height=340,
+        yaxis_title="R$",
+        showlegend=True,
+    )
+    apply_brand_chart_style(fig_rec)
+    fig_rec.update_layout(
+        title=dict(text="Receita líquida (R$) — semana atual vs anterior", x=0.5, xanchor="center"),
+        showlegend=True,
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.07,
+            x=0.5,
+            xanchor="center",
+            bgcolor="rgba(255,255,255,0.92)",
+            bordercolor="#e5e7eb",
+            borderwidth=1,
+        ),
+        margin=dict(t=96, b=48, l=10, r=10),
+    )
+    _polish_weekly_compare_bar_figure(fig_rec)
+    st.plotly_chart(fig_rec, use_container_width=True)
 
 
 def render_header_financial(kpi_df: pd.DataFrame, data_base_label: str) -> None:
@@ -1300,6 +2680,7 @@ def render_progress_projection(
     start_date: date,
     end_date: date,
     show_target_gauges: bool = False,
+    weekly_polish: bool = False,
 ) -> None:
     st.header("Projeções e ritmo de vendas")
     summary = build_route_summary(df, targets)
@@ -1314,71 +2695,81 @@ def render_progress_projection(
         use_container_width=True,
     )
 
-    # Grafico 100% empilhado: todas as barras com mesma altura visual (0 a 100%)
-    chart_summary = summary.copy()
     order_with_total = list(PERCURSO_ORDER) + ["TOTAL"]
-    chart_summary["Percurso"] = pd.Categorical(
-        chart_summary["Percurso"],
-        categories=order_with_total,
-        ordered=True,
-    )
-    chart_summary = chart_summary.sort_values("Percurso").reset_index(drop=True)
-    chart_summary["pct_meta_cap"] = chart_summary["pct_meta"].clip(lower=0, upper=100)
-    chart_summary["pct_restante"] = 100 - chart_summary["pct_meta_cap"]
-    st.subheader("Metas por percurso (inscritos atuais)")
-    fig_comp = go.Figure()
-    # Parte restante até 100% (cinza)
-    fig_comp.add_trace(
-        go.Bar(
-            x=chart_summary["Percurso"],
-            y=chart_summary["pct_restante"],
-            name="Restante até meta",
-            marker_color="rgba(200, 200, 200, 0.5)",
-            text=[f"Meta: {int(v)}" for v in chart_summary["meta"]],
-            textposition="none",
-            customdata=chart_summary[["meta", "inscritos", "pct_meta"]].values,
-            hovertemplate=(
-                "Percurso: %{x}<br>"
-                "Meta: %{customdata[0]}<br>"
-                "Inscritos: %{customdata[1]}<br>"
-                "% da meta: %{customdata[2]:.1f}%<extra></extra>"
-            ),
-            showlegend=True,
+    if weekly_polish:
+        st.markdown(
+            '<div class="mkt-section-title">Metas por percurso — desempenho vs meta</div>',
+            unsafe_allow_html=True,
         )
-    )
-    # Parte inscrita (azul), limitada visualmente a 100%
-    fig_comp.add_trace(
-        go.Bar(
-            x=chart_summary["Percurso"],
-            y=chart_summary["pct_meta_cap"],
-            name="Inscritos",
-            text=[
-                f"{int(r['inscritos'])}/{int(r['meta'])}<br>{format_pct(r['pct_meta'])}"
-                for _, r in chart_summary.iterrows()
-            ],
-            textposition="inside",
-            marker_color="rgba(59, 130, 246, 0.9)",
-            customdata=chart_summary[["meta", "inscritos", "pct_meta"]].values,
-            hovertemplate=(
-                "Percurso: %{x}<br>"
-                "Meta: %{customdata[0]}<br>"
-                "Inscritos: %{customdata[1]}<br>"
-                "% da meta: %{customdata[2]:.1f}%<extra></extra>"
-            ),
-            showlegend=True,
+        st.caption(
+            "Faixa cinza: meta de inscritos. Barra colorida: inscritos atuais (cor por faixa de % da meta). "
+            "Valores absolutos facilitam comparar PTR e RUN lado a lado."
         )
-    )
-    fig_comp = style_bar_labels(fig_comp)
-    fig_comp.update_traces(textposition="none", selector=dict(name="Restante até meta"))
-    fig_comp.update_layout(
-        height=380,
-        barmode="stack",
-        xaxis={"categoryorder": "array", "categoryarray": order_with_total},
-        yaxis_title="% da meta",
-        yaxis=dict(range=[0, 100]),
-        margin=dict(b=80),
-    )
-    st.plotly_chart(fig_comp, use_container_width=True)
+        fig_metas = build_weekly_metas_bullet_figure(summary)
+        st.plotly_chart(fig_metas, use_container_width=True)
+    else:
+        # Grafico 100% empilhado: todas as barras com mesma altura visual (0 a 100%)
+        chart_summary = summary.copy()
+        chart_summary["Percurso"] = pd.Categorical(
+            chart_summary["Percurso"],
+            categories=order_with_total,
+            ordered=True,
+        )
+        chart_summary = chart_summary.sort_values("Percurso").reset_index(drop=True)
+        chart_summary["pct_meta_cap"] = chart_summary["pct_meta"].clip(lower=0, upper=100)
+        chart_summary["pct_restante"] = 100 - chart_summary["pct_meta_cap"]
+        st.subheader("Metas por percurso (inscritos atuais)")
+        fig_comp = go.Figure()
+        fig_comp.add_trace(
+            go.Bar(
+                x=chart_summary["Percurso"],
+                y=chart_summary["pct_restante"],
+                name="Restante até meta",
+                marker_color="rgba(200, 200, 200, 0.5)",
+                text=[f"Meta: {int(v)}" for v in chart_summary["meta"]],
+                textposition="none",
+                customdata=chart_summary[["meta", "inscritos", "pct_meta"]].values,
+                hovertemplate=(
+                    "Percurso: %{x}<br>"
+                    "Meta: %{customdata[0]}<br>"
+                    "Inscritos: %{customdata[1]}<br>"
+                    "% da meta: %{customdata[2]:.1f}%<extra></extra>"
+                ),
+                showlegend=True,
+            )
+        )
+        fig_comp.add_trace(
+            go.Bar(
+                x=chart_summary["Percurso"],
+                y=chart_summary["pct_meta_cap"],
+                name="Inscritos",
+                text=[
+                    f"{int(r['inscritos'])}/{int(r['meta'])}<br>{format_pct(r['pct_meta'])}"
+                    for _, r in chart_summary.iterrows()
+                ],
+                textposition="inside",
+                marker_color="rgba(59, 130, 246, 0.9)",
+                customdata=chart_summary[["meta", "inscritos", "pct_meta"]].values,
+                hovertemplate=(
+                    "Percurso: %{x}<br>"
+                    "Meta: %{customdata[0]}<br>"
+                    "Inscritos: %{customdata[1]}<br>"
+                    "% da meta: %{customdata[2]:.1f}%<extra></extra>"
+                ),
+                showlegend=True,
+            )
+        )
+        fig_comp = style_bar_labels(fig_comp)
+        fig_comp.update_traces(textposition="none", selector=dict(name="Restante até meta"))
+        fig_comp.update_layout(
+            height=380,
+            barmode="stack",
+            xaxis={"categoryorder": "array", "categoryarray": order_with_total},
+            yaxis_title="% da meta",
+            yaxis=dict(range=[0, 100]),
+            margin=dict(b=80),
+        )
+        st.plotly_chart(fig_comp, use_container_width=True)
 
     if show_target_gauges:
         st.subheader("Gauges de meta por percurso e total")
@@ -1444,28 +2835,60 @@ def render_progress_projection(
     series["mm15"] = series["inscricoes_diarias"].rolling(15, min_periods=1).mean()
     series["mm30"] = series["inscricoes_diarias"].rolling(30, min_periods=1).mean()
     proj_rate = series["mm15"].iloc[-1]
+    if pd.isna(proj_rate):
+        proj_rate = 0.0
     days_left = max((end_date - series["day"].iloc[-1]).days, 0)
-    proj_total = int(round(total + proj_rate * days_left))
+    proj_total = int(round(total + float(proj_rate) * days_left))
 
     st.subheader("Média móvel e projeção")
-    st.metric("Projeção de inscritos no prazo", format_int(proj_total))
-    fig_mm = px.line(
-        series,
-        x="day",
-        y=["inscricoes_diarias", "mm7", "mm15", "mm30"],
-        labels={"day": "Data", "value": "Inscrições", "variable": "Série"},
-    )
-    fig_mm.update_layout(height=360)
-    st.plotly_chart(fig_mm, use_container_width=True)
+    if weekly_polish:
+        last_day = series["day"].iloc[-1]
+        st.caption(
+            f"Projeção ao fim da campanha ({end_date.strftime('%d/%m/%Y')}): "
+            "inscritos acumulados até "
+            f"{last_day.strftime('%d/%m/%Y')} + (última média móvel em inscrições/dia) × "
+            f"{days_left} dia(s) restantes. Traços mostram apenas médias móveis no painel inferior — "
+            "eixo Y dedicado para leitura sem compressão pelos picos diários."
+        )
+        fig_mm, projs = build_weekly_ma_projection_figure(series, total, end_date)
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Projeção total (MM 7d)", format_int(projs["mm7"]))
+        m2.metric("Projeção total (MM 15d)", format_int(projs["mm15"]))
+        m3.metric("Projeção total (MM 30d)", format_int(projs["mm30"]))
+        st.plotly_chart(fig_mm, use_container_width=True)
+    else:
+        st.metric("Projeção de inscritos no prazo", format_int(proj_total))
+        fig_mm = px.line(
+            series,
+            x="day",
+            y=["inscricoes_diarias", "mm7", "mm15", "mm30"],
+            labels={"day": "Data", "value": "Inscrições", "variable": "Série"},
+        )
+        fig_mm.update_layout(height=360)
+        st.plotly_chart(fig_mm, use_container_width=True)
 
 
-def render_marketing_target_gauges(df: pd.DataFrame, targets: dict[str, int]) -> None:
+def render_marketing_target_gauges(
+    df: pd.DataFrame,
+    targets: dict[str, int],
+    *,
+    weekly_polish: bool = False,
+) -> None:
     st.header("Gauges de metas de atletas (Marketing)")
+    if weekly_polish:
+        st.caption(
+            "Mesmo tipo de leitura do gráfico de Metas acima: faixa cinza = meta; barra colorida = "
+            "inscritos (ou óculos Yopp), cor por faixa de % da meta; rótulos à direita evitam sobreposição no centro."
+        )
+        st.plotly_chart(build_marketing_gauges_grid_figure(df, targets), use_container_width=True)
+        return
+
     summary = build_route_summary(df, targets)
     gauge_order = ["TOTAL"] + PERCURSO_ORDER
     gauge_df = summary.copy()
     gauge_df["Percurso"] = pd.Categorical(gauge_df["Percurso"], categories=gauge_order, ordered=True)
     gauge_df = gauge_df.sort_values("Percurso").reset_index(drop=True)
+
     gauge_cols = st.columns(3)
 
     for idx, row in gauge_df.iterrows():
@@ -1605,7 +3028,8 @@ def render_geography(df: pd.DataFrame, ibge_df: pd.DataFrame) -> None:
     total_brazil = len(brazil)
     city_counts = brazil["city_display"].value_counts().rename_axis("Cidade").reset_index(name="Inscritos")
     city_counts["% brasileiros"] = city_counts["Inscritos"].apply(lambda v: format_pct((v / total_brazil) * 100))
-    st.subheader("Top cidades")
+    n_cidades = int(brazil["city_display"].nunique())
+    st.subheader(f"Top cidades ({n_cidades} cidades)")
     st.dataframe(city_counts, hide_index=True, use_container_width=True)
 
     merged = brazil.merge(ibge_df[["City_norm", "UF", "Região"]], left_on="city_norm", right_on="City_norm", how="left")
@@ -1614,7 +3038,8 @@ def render_geography(df: pd.DataFrame, ibge_df: pd.DataFrame) -> None:
     uf_counts = uf_counts.sort_values("Inscritos", ascending=False)
     reg_counts = merged["Região"].fillna("NA").value_counts().rename_axis("Regiao").reset_index(name="Inscritos")
 
-    st.subheader("Top Estados")
+    n_ufs = int(merged["UF"].fillna("NA").nunique())
+    st.subheader(f"Top Estados ({n_ufs} estados)")
     st.dataframe(uf_counts, hide_index=True, use_container_width=True)
 
     st.subheader("Regiões do Brasil")
@@ -2598,605 +4023,6 @@ def load_mercado_pago_file(uploaded_file) -> pd.DataFrame:
     return df
 
 
-@st.cache_data(show_spinner=False)
-def load_njuko_file(uploaded_file) -> pd.DataFrame:
-    df = pd.read_excel(uploaded_file, sheet_name=0)
-    df = normalize_headers(df)
-    df = df.dropna(how="all").copy()
-    return df
-
-
-def to_context_columns(columns: list[str], limit: int = 40) -> list[str]:
-    if len(columns) <= limit:
-        return columns
-    return columns[:limit] + [f"... (+{len(columns) - limit} colunas)"]
-
-
-def format_years_for_debug(series: pd.Series) -> str:
-    numeric_years = pd.to_numeric(series, errors="coerce").dropna().astype(int)
-    valid_years = sorted({year for year in numeric_years.tolist() if MIN_VALID_YEAR <= year <= MAX_VALID_YEAR})
-    if not valid_years:
-        return "-"
-    return ", ".join(str(year) for year in valid_years)
-
-
-def build_ai_upload_diagnostic(full_df: pd.DataFrame | None, filtered_df: pd.DataFrame | None) -> pd.DataFrame:
-    if full_df is None or full_df.empty:
-        return pd.DataFrame(
-            columns=[
-                "Arquivo",
-                "Origem",
-                "Linhas upload",
-                "Linhas inscritas",
-                "Status reconhecido (%)",
-                "Anos no upload",
-                "Anos nas inscritas",
-                "Sem ano (upload)",
-                "Sem ano (inscritas)",
-            ]
-        )
-
-    grouped_rows: list[dict[str, Any]] = []
-    source_series = full_df["source_file"] if "source_file" in full_df.columns else pd.Series(["(sem origem)"] * len(full_df))
-    for source_name, source_df in full_df.groupby(source_series):
-        source_name = str(source_name)
-        upload_rows = int(len(source_df))
-        missing_year_upload = int(source_df["Ano"].isna().sum()) if "Ano" in source_df.columns else upload_rows
-        upload_years = format_years_for_debug(source_df["Ano"]) if "Ano" in source_df.columns else "-"
-
-        if filtered_df is not None and "source_file" in filtered_df.columns:
-            registered_df = filtered_df[filtered_df["source_file"].astype(str) == source_name].copy()
-        else:
-            registered_df = pd.DataFrame(columns=source_df.columns)
-
-        registered_rows = int(len(registered_df))
-        missing_year_registered = int(registered_df["Ano"].isna().sum()) if "Ano" in registered_df.columns else registered_rows
-        registered_years = format_years_for_debug(registered_df["Ano"]) if "Ano" in registered_df.columns else "-"
-        recognized_pct = (registered_rows / upload_rows * 100) if upload_rows else 0.0
-
-        grouped_rows.append(
-            {
-                "Arquivo": source_name,
-                "Origem": "GitHub histórico" if "[GITHUB]" in source_name else "Upload sessão",
-                "Linhas upload": upload_rows,
-                "Linhas inscritas": registered_rows,
-                "Status reconhecido (%)": recognized_pct,
-                "Anos no upload": upload_years,
-                "Anos nas inscritas": registered_years,
-                "Sem ano (upload)": missing_year_upload,
-                "Sem ano (inscritas)": missing_year_registered,
-            }
-        )
-
-    diag_df = pd.DataFrame(grouped_rows).sort_values("Linhas upload", ascending=False).reset_index(drop=True)
-    diag_df["Linhas upload"] = diag_df["Linhas upload"].map(format_int)
-    diag_df["Linhas inscritas"] = diag_df["Linhas inscritas"].map(format_int)
-    diag_df["Sem ano (upload)"] = diag_df["Sem ano (upload)"].map(format_int)
-    diag_df["Sem ano (inscritas)"] = diag_df["Sem ano (inscritas)"].map(format_int)
-    diag_df["Status reconhecido (%)"] = diag_df["Status reconhecido (%)"].map(format_pct)
-    return diag_df
-
-
-def build_session_data_context(
-    full_df: pd.DataFrame | None,
-    filtered_df: pd.DataFrame | None,
-    mp_df: pd.DataFrame | None,
-) -> dict[str, Any]:
-    context: dict[str, Any] = {"datasets": {}, "available": []}
-
-    if full_df is not None:
-        full_years = sorted(full_df["Ano"].dropna().astype(int).unique().tolist()) if "Ano" in full_df.columns else []
-        context["datasets"]["inscricoes_upload"] = {
-            "rows": int(len(full_df)),
-            "columns": to_context_columns(full_df.columns.astype(str).tolist()),
-            "years": full_years,
-            "missing_year_rows": int(full_df["Ano"].isna().sum()) if "Ano" in full_df.columns else 0,
-        }
-        context["available"].append("inscricoes_upload")
-
-    if filtered_df is not None:
-        filtered_yearly = (
-            filtered_df.groupby("Ano").size().rename("inscritos").reset_index().sort_values("Ano")
-            if "Ano" in filtered_df.columns
-            else pd.DataFrame(columns=["Ano", "inscritos"])
-        )
-        context["datasets"]["inscricoes_confirmadas"] = {
-            "rows": int(len(filtered_df)),
-            "columns": to_context_columns(filtered_df.columns.astype(str).tolist()),
-            "total_net_revenue_brl": float(filtered_df["net_revenue_brl"].sum()) if "net_revenue_brl" in filtered_df.columns else 0.0,
-            "inscritos_por_ano": filtered_yearly.to_dict(orient="records"),
-        }
-        context["available"].append("inscricoes_confirmadas")
-
-    if mp_df is not None:
-        mp_approved = get_mp_approved_scope(mp_df)
-        status_counts = (
-            mp_df["Estado"].fillna("Sem estado").astype(str).value_counts().rename_axis("estado").reset_index(name="qtd")
-            if "Estado" in mp_df.columns
-            else pd.DataFrame(columns=["estado", "qtd"])
-        )
-        context["datasets"]["mercado_pago"] = {
-            "rows": int(len(mp_df)),
-            "columns": to_context_columns(mp_df.columns.astype(str).tolist()),
-            "rows_aprovado": int(len(mp_approved)),
-            "total_liquido_brl_aprovado": (
-                float(mp_approved["Total a receber_num"].sum()) if "Total a receber_num" in mp_approved.columns else 0.0
-            ),
-            "status_counts": status_counts.to_dict(orient="records"),
-        }
-        context["available"].append("mercado_pago")
-
-    return context
-
-
-@st.cache_data(show_spinner=False)
-def load_historical_ai_github_full_df() -> pd.DataFrame:
-    historical_dfs: list[pd.DataFrame] = []
-    for source in HISTORICAL_AI_GITHUB_SOURCES:
-        source_url = source.get("url", "")
-        source_name = source.get("name", "historico.xlsx")
-        if not source_url:
-            continue
-        try:
-            response = requests.get(source_url, timeout=30)
-            response.raise_for_status()
-            file_bytes = BytesIO(response.content)
-            file_bytes.name = str(source_name)
-            hist_df = preprocess_uploaded_file(file_bytes, validate_required=False)
-            inferred_year = infer_year_from_filename(source_name)
-            if inferred_year is not None:
-                # Bases históricas representam a edição do evento; fixa ano pela fonte.
-                hist_df["Ano"] = pd.Series(inferred_year, index=hist_df.index, dtype="Int64")
-            historical_dfs.append(hist_df)
-        except Exception:  # noqa: BLE001
-            continue
-
-    if not historical_dfs:
-        return pd.DataFrame()
-    return pd.concat(historical_dfs, ignore_index=True)
-
-
-def build_ia_base(
-    uploaded_full_df: pd.DataFrame | None,
-    include_github_history: bool,
-) -> tuple[pd.DataFrame | None, pd.DataFrame | None]:
-    frames: list[pd.DataFrame] = []
-    if uploaded_full_df is not None and not uploaded_full_df.empty:
-        frames.append(uploaded_full_df.copy())
-
-    if include_github_history:
-        github_hist_df = load_historical_ai_github_full_df()
-        if not github_hist_df.empty:
-            frames.append(github_hist_df.copy())
-
-    if not frames:
-        return None, None
-
-    full_df = pd.concat(frames, ignore_index=True)
-    filtered_df = get_filtered_base(full_df)
-    return full_df, filtered_df
-
-
-def detect_gender_column(df: pd.DataFrame | None) -> str | None:
-    if df is None:
-        return None
-    return find_column_by_candidates(df.columns, AI_GENDER_CANDIDATES)
-
-
-def extract_years_from_question(question: str) -> list[int]:
-    years = [int(year) for year in re.findall(r"\b(20\d{2})\b", question)]
-    return [year for year in years if MIN_VALID_YEAR <= year <= MAX_VALID_YEAR]
-
-
-def filter_df_by_years(df: pd.DataFrame, years: list[int]) -> pd.DataFrame:
-    if not years or "Ano" not in df.columns:
-        return df.copy()
-    return df[df["Ano"].isin(years)].copy()
-
-
-def is_mercado_pago_question(question: str) -> bool:
-    lower_question = str(question).lower()
-    if re.search(r"\bmercado\s*pago\b", lower_question):
-        return True
-    return bool(re.search(r"\bmp\b", lower_question))
-
-
-def is_year_inventory_question(question_norm: str) -> bool:
-    # norm_text compacta espaços; aqui usamos marcadores sem whitespace.
-    markers = [
-        "quantosanos",
-        "quaisanos",
-        "anosdeevento",
-        "anosexistem",
-        "anosdisponiveis",
-    ]
-    return any(marker in question_norm for marker in markers)
-
-
-def deterministic_query_answer(question: str, filtered_df: pd.DataFrame | None, mp_df: pd.DataFrame | None) -> dict[str, Any] | None:
-    question_norm = norm_text(question)
-    years_in_question = extract_years_from_question(question)
-
-    if filtered_df is not None:
-        local = filter_df_by_years(filtered_df, years_in_question)
-        has_inscricoes_terms = any(token in question_norm for token in ["inscrit", "inscricao", "atleta", "confirmad"])
-        has_total_terms = any(token in question_norm for token in ["quantos", "qtd", "total", "numero"])
-        has_female_terms = any(token in question_norm for token in ["mulher", "femin", "female"])
-        has_revenue_terms = any(token in question_norm for token in ["receita", "faturamento", "bruto", "liquido", "desconto"])
-        has_year_terms = any(token in question_norm for token in ["ano", "anos", "edicao", "edicoes", "evento", "historico"])
-        has_year_inventory_intent = (
-            has_year_terms
-            and is_year_inventory_question(question_norm)
-            and not has_inscricoes_terms
-            and not has_female_terms
-            and not has_revenue_terms
-        )
-
-        if has_inscricoes_terms and has_female_terms:
-            gender_col = detect_gender_column(local)
-            if not gender_col:
-                return {
-                    "type": "limitation",
-                    "answer_text": (
-                        "Não consegui calcular mulheres inscritas porque a base carregada não tem coluna de gênero "
-                        "(ex.: gender/sexo/gênero)."
-                    ),
-                    "data": {"required_column": "gender|sexo|gênero"},
-                }
-
-            female_df = local.loc[female_mask_from_series(local[gender_col])].copy()
-            by_year = (
-                female_df.groupby("Ano").size().rename("mulheres_inscritas").reset_index().sort_values("Ano")
-                if "Ano" in female_df.columns
-                else pd.DataFrame(columns=["Ano", "mulheres_inscritas"])
-            )
-            total = int(len(female_df))
-            years = by_year["Ano"].astype(int).tolist() if not by_year.empty else []
-            label_years = ", ".join(str(y) for y in years) if years else "anos disponíveis"
-            return {
-                "type": "female_count",
-                "answer_text": f"Total de mulheres inscritas: {format_int(total)} ({label_years}).",
-                "data": {
-                    "total_mulheres_inscritas": total,
-                    "por_ano": by_year.to_dict(orient="records"),
-                    "coluna_genero_usada": gender_col,
-                },
-            }
-
-        if has_inscricoes_terms and has_total_terms:
-            total = int(len(local))
-            by_year = (
-                local.groupby("Ano").size().rename("inscritos").reset_index().sort_values("Ano")
-                if "Ano" in local.columns
-                else pd.DataFrame(columns=["Ano", "inscritos"])
-            )
-            return {
-                "type": "registered_count",
-                "answer_text": f"Total de inscritos confirmados: {format_int(total)}.",
-                "data": {"total_inscritos": total, "por_ano": by_year.to_dict(orient="records")},
-            }
-
-        if has_revenue_terms:
-            gross = float(local["total_registration_brl"].sum()) if "total_registration_brl" in local.columns else 0.0
-            discounts = float(local["total_discounts_brl"].sum()) if "total_discounts_brl" in local.columns else 0.0
-            net = float(local["net_revenue_brl"].sum()) if "net_revenue_brl" in local.columns else 0.0
-            gross_brl, gross_usd_brl, _ = revenue_split_by_currency(local, "total_registration_brl")
-            return {
-                "type": "inscricoes_financial_totals",
-                "answer_text": (
-                    f"Receita de inscrições na sessão: líquido {format_currency(net)}, "
-                    f"bruto {format_currency(gross)}, descontos {format_currency(discounts)}."
-                ),
-                "data": {
-                    "receita_liquida_brl": net,
-                    "receita_bruta_brl": gross,
-                    "descontos_brl": discounts,
-                    "receita_bruta_brl_moeda_brl": gross_brl,
-                    "receita_bruta_brl_convertida_de_usd": gross_usd_brl,
-                },
-            }
-
-        if has_year_inventory_intent and "Ano" in local.columns:
-            years_series = pd.to_numeric(local["Ano"], errors="coerce").dropna().astype(int)
-            years_available = sorted({year for year in years_series.tolist() if MIN_VALID_YEAR <= year <= MAX_VALID_YEAR})
-            if years_available:
-                years_label = ", ".join(str(year) for year in years_available)
-                return {
-                    "type": "available_years",
-                    "answer_text": (
-                        f"Identifiquei {format_int(len(years_available))} anos de evento na sessão: {years_label}."
-                    ),
-                    "data": {
-                        "total_anos_evento": len(years_available),
-                        "anos_disponiveis": years_available,
-                        "intervalo": {
-                            "min": min(years_available),
-                            "max": max(years_available),
-                        },
-                    },
-                }
-            return {
-                "type": "limitation",
-                "answer_text": "Não consegui identificar anos válidos na coluna `Ano` para responder essa pergunta.",
-                "data": {"required_column": "Ano"},
-            }
-
-    if mp_df is not None and is_mercado_pago_question(question):
-        has_financial_terms = any(token in question_norm for token in ["liquido", "total", "receb", "taxa", "bruto"])
-        if has_financial_terms:
-            approved_scope = get_mp_approved_scope(mp_df)
-            total_liquido = (
-                float(approved_scope["Total a receber_num"].sum()) if "Total a receber_num" in approved_scope.columns else 0.0
-            )
-            total_bruto = float(approved_scope["Recebimento_num"].sum()) if "Recebimento_num" in approved_scope.columns else 0.0
-            total_taxa = (
-                abs(float(approved_scope["Tarifas e impostos_num"].sum()))
-                if "Tarifas e impostos_num" in approved_scope.columns
-                else 0.0
-            )
-            taxa_media = (total_taxa / total_bruto * 100) if total_bruto else 0.0
-            return {
-                "type": "mercado_pago_totals",
-                "answer_text": (
-                    f"Mercado Pago (somente status Aprovado): líquido {format_currency(total_liquido)}, "
-                    f"bruto {format_currency(total_bruto)}, taxa média {format_pct(taxa_media)}."
-                ),
-                "data": {
-                    "escopo_estado": "Aprovado",
-                    "total_liquido_brl": total_liquido,
-                    "total_bruto_brl": total_bruto,
-                    "taxa_media_pct": taxa_media,
-                },
-            }
-
-    return None
-
-
-def get_openai_api_key() -> str | None:
-    api_key = st.secrets.get("OPENAI_API_KEY")
-    if not api_key:
-        return None
-    return str(api_key)
-
-
-def get_openai_connection_status(force_refresh: bool = False) -> dict[str, Any]:
-    cache_key = "openai_connection_status"
-    now_ts = datetime.now().timestamp()
-    cached = st.session_state.get(cache_key)
-    ttl_seconds = 180
-    if not force_refresh and isinstance(cached, dict):
-        cached_ts = float(cached.get("checked_at", 0))
-        if (now_ts - cached_ts) <= ttl_seconds:
-            return cached
-
-    model = str(st.secrets.get("OPENAI_MODEL", "gpt-4o-mini"))
-    status: dict[str, Any] = {
-        "ok": False,
-        "message": "Conexão OpenAI ainda não validada.",
-        "model": model,
-        "checked_at": now_ts,
-    }
-
-    if OpenAI is None:
-        status["message"] = "Biblioteca `openai` não está instalada no ambiente."
-    else:
-        api_key = get_openai_api_key()
-        if not api_key:
-            status["message"] = "OPENAI_API_KEY ausente em `.streamlit/secrets.toml`."
-        else:
-            try:
-                client = OpenAI(api_key=api_key)
-                client.models.retrieve(model)
-                status["ok"] = True
-                status["message"] = f"Conectado com sucesso ao modelo `{model}`."
-            except Exception as exc:  # noqa: BLE001
-                status["message"] = f"Falha ao validar OpenAI: {exc}"
-
-    st.session_state[cache_key] = status
-    return status
-
-
-def build_ai_system_prompt() -> str:
-    return (
-        "Você é um analista de dados do dashboard Paraty by UTMB. "
-        "Responda sempre em português, seja objetivo e não invente valores. "
-        "Use apenas os dados recebidos no contexto da sessão. "
-        "Quando faltar coluna/dado, explique claramente a limitação e sugira o campo necessário. "
-        "Para perguntas quantitativas com resultado determinístico recebido, preserve exatamente os números."
-    )
-
-
-def build_context_signature(context_payload: dict[str, Any]) -> str:
-    return json.dumps(context_payload, ensure_ascii=False, sort_keys=True, default=str)
-
-
-def get_dynamic_quick_questions(context_payload: dict[str, Any]) -> list[str]:
-    available = set(context_payload.get("available", []))
-    prompts: list[str] = []
-    if {"inscricoes_upload", "inscricoes_confirmadas"} & available:
-        prompts.extend(AI_QUICK_QUESTIONS_INSCRICOES)
-    if "mercado_pago" in available:
-        prompts.extend(AI_QUICK_QUESTIONS_MP)
-    return prompts
-
-
-def call_openai_for_dashboard_chat(
-    user_prompt: str,
-    context_payload: dict[str, Any],
-    deterministic_result: dict[str, Any] | None,
-    chat_history: list[dict[str, str]],
-) -> str:
-    if OpenAI is None:
-        return "Não consegui usar OpenAI porque a biblioteca `openai` não está instalada no ambiente."
-
-    api_key = get_openai_api_key()
-    if not api_key:
-        return (
-            "A integração OpenAI não está configurada. "
-            "Adicione `OPENAI_API_KEY` em `.streamlit/secrets.toml` para habilitar respostas com IA."
-        )
-
-    model = str(st.secrets.get("OPENAI_MODEL", "gpt-4o-mini"))
-    client = OpenAI(api_key=api_key)
-    context_json = json.dumps(context_payload, ensure_ascii=False, default=str)
-    if len(context_json) > 20000:
-        context_json = context_json[:20000] + "... [contexto truncado]"
-
-    history_to_send = chat_history[-6:] if chat_history else []
-    messages: list[dict[str, str]] = [{"role": "system", "content": build_ai_system_prompt()}]
-    for item in history_to_send:
-        role = item.get("role", "")
-        content = item.get("content", "")
-        if role in {"user", "assistant"} and content:
-            messages.append({"role": role, "content": content})
-
-    deterministic_json = json.dumps(deterministic_result, ensure_ascii=False, default=str) if deterministic_result else "null"
-    messages.append(
-        {
-            "role": "user",
-            "content": (
-                "Contexto da sessão (JSON):\n"
-                f"{context_json}\n\n"
-                "Resultado determinístico pré-calculado (use os números exatamente, se presente):\n"
-                f"{deterministic_json}\n\n"
-                f"Pergunta do usuário: {user_prompt}"
-            ),
-        }
-    )
-
-    try:
-        response = client.chat.completions.create(
-            model=model,
-            temperature=0.1,
-            messages=messages,
-        )
-        answer = response.choices[0].message.content if response.choices else ""
-        return str(answer).strip() if answer else "Não consegui gerar resposta agora. Tente reformular a pergunta."
-    except Exception as exc:  # noqa: BLE001
-        return f"Falha ao consultar OpenAI: {exc}"
-
-
-def render_dashboard_ia(
-    full_df: pd.DataFrame | None,
-    filtered_df: pd.DataFrame | None,
-    mp_df: pd.DataFrame | None,
-) -> None:
-    st.markdown(
-        """
-        <div class="hero">
-          <h2>Aba IA - Perguntas livres sobre os dados da sessão</h2>
-          <p class="subtle">Formato de chat para explorar inscrições e Mercado Pago com base nos uploads atuais.</p>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    if full_df is None and mp_df is None:
-        st.info("Envie ao menos uma planilha principal ou um arquivo Mercado Pago para usar a aba IA.")
-        return
-
-    context_payload = build_session_data_context(full_df, filtered_df, mp_df)
-    datasets_label = ", ".join(context_payload.get("available", [])) if context_payload.get("available") else "nenhum"
-    st.caption(f"Contexto disponível na sessão: {datasets_label}")
-    st.caption("Privacidade: a IA recebe apenas agregados e metadados (não envia amostras brutas por padrão).")
-    openai_status_col_1, openai_status_col_2 = st.columns([5, 1])
-    with openai_status_col_2:
-        refresh_openai_status = st.button("Revalidar OpenAI", use_container_width=True)
-    openai_status = get_openai_connection_status(force_refresh=refresh_openai_status)
-    with openai_status_col_1:
-        if openai_status.get("ok"):
-            st.success(f"Farol OpenAI: {openai_status.get('message')}")
-        else:
-            st.error(f"Farol OpenAI: {openai_status.get('message')}")
-
-    context_signature = build_context_signature(context_payload)
-    previous_signature = st.session_state.get("ia_context_signature")
-    if previous_signature is None:
-        st.session_state["ia_context_signature"] = context_signature
-    elif previous_signature != context_signature:
-        st.session_state["ia_chat_messages"] = [
-            {
-                "role": "assistant",
-                "content": "Base atualizada. Reiniciei a conversa para evitar respostas com contexto antigo.",
-            }
-        ]
-        st.session_state["ia_context_signature"] = context_signature
-
-    if "ia_chat_messages" not in st.session_state:
-        st.session_state["ia_chat_messages"] = [
-            {
-                "role": "assistant",
-                "content": "Pronto para analisar seus dados da sessão. Faça uma pergunta objetiva em linguagem natural.",
-            }
-        ]
-
-    quick_questions = get_dynamic_quick_questions(context_payload)
-    quick_cols = st.columns(2)
-    selected_quick_prompt = None
-    for idx, question in enumerate(quick_questions):
-        target_col = quick_cols[idx % 2]
-        with target_col:
-            if st.button(question, key=f"quick_ai_{idx}", use_container_width=True):
-                selected_quick_prompt = question
-
-    action_col_1, action_col_2 = st.columns([1, 4])
-    with action_col_1:
-        if st.button("Limpar conversa", use_container_width=True):
-            st.session_state["ia_chat_messages"] = [
-                {
-                    "role": "assistant",
-                    "content": "Conversa reiniciada. Pode enviar a próxima pergunta.",
-                }
-            ]
-            st.rerun()
-    with action_col_2:
-        st.caption("Perguntas quantitativas tentam cálculo em pandas antes da chamada ao modelo.")
-
-    with st.expander("Diagnóstico de leitura da base (IA)", expanded=st.session_state.get("print_mode", False)):
-        diagnostic_df = build_ai_upload_diagnostic(full_df, filtered_df)
-        if diagnostic_df.empty:
-            st.info("Sem planilhas principais carregadas na sessão para diagnóstico.")
-        else:
-            st.dataframe(diagnostic_df, hide_index=True, use_container_width=True)
-            st.caption(
-                "Use esta tabela para validar se anos antigos foram detectados por arquivo e "
-                "se os status de inscrição estão sendo reconhecidos."
-            )
-
-    for msg in st.session_state["ia_chat_messages"]:
-        with st.chat_message(msg["role"]):
-            st.markdown(msg["content"])
-
-    typed_prompt = st.chat_input("Ex.: quantas mulheres estão inscritas nos 4 anos de evento?")
-    user_prompt = selected_quick_prompt or typed_prompt
-    if not user_prompt:
-        return
-
-    st.session_state["ia_chat_messages"].append({"role": "user", "content": user_prompt})
-    with st.chat_message("user"):
-        st.markdown(user_prompt)
-
-    deterministic_result = deterministic_query_answer(user_prompt, filtered_df, mp_df)
-    history = st.session_state["ia_chat_messages"][:-1]
-    if deterministic_result is not None:
-        assistant_text = deterministic_result.get("answer_text", "Não consegui calcular esta pergunta.")
-    else:
-        assistant_text = call_openai_for_dashboard_chat(
-            user_prompt=user_prompt,
-            context_payload=context_payload,
-            deterministic_result=deterministic_result,
-            chat_history=history,
-        )
-
-    if deterministic_result and deterministic_result.get("data"):
-        details_json = json.dumps(deterministic_result["data"], ensure_ascii=False, default=str, indent=2)
-        assistant_text = f"{assistant_text}\n\n```json\n{details_json}\n```"
-
-    st.session_state["ia_chat_messages"].append({"role": "assistant", "content": assistant_text})
-    with st.chat_message("assistant"):
-        st.markdown(assistant_text)
-
-
 def render_dashboard_mercado_pago(df_mp: pd.DataFrame, source_name: str) -> None:
     st.markdown(
         f"""
@@ -3786,165 +4612,6 @@ def render_dashboard_mercado_pago(df_mp: pd.DataFrame, source_name: str) -> None
     )
 
 
-def render_dashboard_analise_limbo(
-    df_mp: pd.DataFrame,
-    df_njuko: pd.DataFrame,
-    mp_source_name: str,
-    njuko_source_name: str,
-) -> dict[str, Any]:
-    st.title("🔴 Análise Limbo")
-    st.caption(
-        "Cross-check entre Mercado Pago e Njuko para encontrar atletas com pagamento aprovado sem correspondência na plataforma."
-    )
-    st.caption(f"Fontes: MP `{mp_source_name}` | Njuko `{njuko_source_name}`")
-
-    required_mp_cols = {"Número da transação", "Estado", "Descrição do item"}
-    required_njuko_cols = {"Gateway reference"}
-    missing_mp = sorted(required_mp_cols - set(df_mp.columns))
-    missing_njuko = sorted(required_njuko_cols - set(df_njuko.columns))
-    if missing_mp:
-        st.error(f"Arquivo Mercado Pago sem colunas obrigatórias: {', '.join(missing_mp)}")
-        return {"ok": False, "total_aprovado": 0, "total_limbo": 0, "valor_risco": 0.0}
-    if missing_njuko:
-        st.error(f"Arquivo Njuko sem colunas obrigatórias: {', '.join(missing_njuko)}")
-        return {"ok": False, "total_aprovado": 0, "total_limbo": 0, "valor_risco": 0.0}
-
-    with st.spinner("Processando cross-check..."):
-        mp_aprovado = df_mp[df_mp["Estado"].astype(str).str.strip().eq("Aprovado")].copy()
-        transacao_raw = mp_aprovado["Número da transação"].fillna("").astype(str).str.strip()
-        transacao_num = pd.to_numeric(transacao_raw.str.replace(r"\.0+$", "", regex=True), errors="coerce")
-        transacao_norm = transacao_raw.where(transacao_num.isna(), transacao_num.astype("Int64").astype(str))
-        mp_aprovado["Número da transação"] = transacao_norm
-        mp_aprovado = mp_aprovado[mp_aprovado["Número da transação"] != ""].copy()
-
-        if "Recebimento" in mp_aprovado.columns:
-            mp_aprovado["Recebimento_num"] = parse_brl_currency_series(mp_aprovado["Recebimento"])
-        elif "Recebimento_num" not in mp_aprovado.columns:
-            mp_aprovado["Recebimento_num"] = 0.0
-
-        njuko_refs = (
-            df_njuko["Gateway reference"]
-            .dropna()
-            .astype(str)
-            .str.strip()
-        )
-        njuko_refs = njuko_refs[njuko_refs != ""]
-        njuko_ref_set = set(njuko_refs.tolist())
-
-        mp_encontrado = mp_aprovado[mp_aprovado["Número da transação"].isin(njuko_ref_set)].copy()
-        mp_limbo = mp_aprovado[~mp_aprovado["Número da transação"].isin(njuko_ref_set)].copy()
-
-        item_desc_limbo = (
-            mp_limbo["Descrição do item"].fillna("").astype(str)
-            if "Descrição do item" in mp_limbo.columns
-            else pd.Series("", index=mp_limbo.index, dtype="object")
-        )
-        mp_limbo["Prova"] = item_desc_limbo.str.extract(r"FR\d+ : (.+?) \(", expand=False).fillna("Não identificada")
-        mp_limbo["ID Njuko"] = item_desc_limbo.str.extract(r"\(([a-fA-F0-9]+)\)", expand=False).fillna("")
-
-        matched_njuko = df_njuko.copy()
-        matched_njuko["Gateway reference"] = matched_njuko["Gateway reference"].fillna("").astype(str).str.strip()
-        matched_njuko = matched_njuko[
-            matched_njuko["Gateway reference"].isin(mp_encontrado["Número da transação"])
-        ].copy()
-        if "Status" in matched_njuko.columns:
-            status_upper = matched_njuko["Status"].fillna("").astype(str).str.strip().str.upper()
-            paid_refs = set(matched_njuko.loc[status_upper.eq("PAID"), "Gateway reference"].tolist())
-            waiting_refs = set(matched_njuko.loc[status_upper.eq("WAITING"), "Gateway reference"].tolist())
-        else:
-            paid_refs = set()
-            waiting_refs = set()
-
-        total_aprovado = int(len(mp_aprovado))
-        total_encontrados = int(len(mp_encontrado))
-        total_limbo = int(len(mp_limbo))
-        encontrados_paid = int(mp_encontrado["Número da transação"].isin(paid_refs).sum())
-        encontrados_waiting = int(mp_encontrado["Número da transação"].isin(waiting_refs).sum())
-        valor_risco = float(mp_limbo["Recebimento_num"].sum())
-
-    prev_limbo = st.session_state.get("limbo_prev_count")
-    delta_limbo = None if prev_limbo is None else f"{int(total_limbo - int(prev_limbo)):+d} vs última execução"
-    st.session_state["limbo_prev_count"] = total_limbo
-
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Total MP Aprovado", format_int(total_aprovado))
-    c2.metric(
-        "Encontrados na Njuko",
-        format_int(total_encontrados),
-        delta=f"PAID: {format_int(encontrados_paid)} | WAITING: {format_int(encontrados_waiting)}",
-    )
-    c3.metric("Atletas no Limbo", format_int(total_limbo), delta=delta_limbo)
-    c4.metric("Valor total em risco", format_currency_brl_2(valor_risco))
-
-    st.subheader("Distribuição por prova")
-    if mp_limbo.empty:
-        st.info("Nenhum atleta no limbo para o cruzamento atual.")
-    else:
-        dist = (
-            mp_limbo.groupby("Prova", dropna=False)
-            .agg(
-                **{
-                    "Qtd atletas no limbo": ("Prova", "size"),
-                    "Valor total recebido (R$)": ("Recebimento_num", "sum"),
-                }
-            )
-            .reset_index()
-            .sort_values("Qtd atletas no limbo", ascending=False)
-        )
-        total_limbo_base = float(total_limbo) if total_limbo else 1.0
-        dist["% do total limbo"] = dist["Qtd atletas no limbo"] / total_limbo_base * 100
-        dist_display = dist.copy()
-        dist_display["% do total limbo"] = dist_display["% do total limbo"].map(
-            lambda x: f"{x:.2f}%".replace(".", ",")
-        )
-        dist_display["Valor total recebido (R$)"] = dist_display["Valor total recebido (R$)"].map(format_currency_brl_2)
-        st.dataframe(dist_display, hide_index=True, use_container_width=True)
-
-    detail_cols = [
-        "Número da transação",
-        "Data da transação",
-        "Prova",
-        "Descrição do item",
-        "Recebimento",
-        "Meio de pagamento",
-        "Referência externa",
-        "ID Njuko",
-    ]
-    detail_df = mp_limbo.copy()
-    for col in detail_cols:
-        if col not in detail_df.columns:
-            detail_df[col] = ""
-    detail_df["Recebimento"] = detail_df["Recebimento_num"].map(format_currency_brl_2)
-    detail_view = detail_df[detail_cols].copy()
-
-    with st.expander(
-        f"Tabela detalhada dos atletas no limbo ({format_int(total_limbo)} registros)",
-        expanded=st.session_state.get("print_mode", False),
-    ):
-        st.dataframe(detail_view, hide_index=True, use_container_width=True)
-
-    excel_buffer = BytesIO()
-    with pd.ExcelWriter(excel_buffer, engine="openpyxl") as writer:
-        detail_view.to_excel(writer, index=False, sheet_name="Atletas no limbo")
-    st.download_button(
-        "Baixar atletas no limbo (.xlsx)",
-        data=excel_buffer.getvalue(),
-        file_name="analise_limbo_atletas.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        use_container_width=True,
-    )
-
-    return {
-        "ok": True,
-        "total_aprovado": total_aprovado,
-        "total_encontrados": total_encontrados,
-        "encontrados_paid": encontrados_paid,
-        "encontrados_waiting": encontrados_waiting,
-        "total_limbo": total_limbo,
-        "valor_risco": valor_risco,
-    }
-
-
 def render_exports(raw_df: pd.DataFrame, kpi_df: pd.DataFrame) -> None:
     st.header("Exportações")
     export_df = kpi_df.copy()
@@ -3987,13 +4654,16 @@ def main() -> None:
     st.sidebar.markdown("---")
     tipo_relatorio = st.sidebar.radio(
         "Selecione o relatório",
-        options=["Geral", "Marketing", "Financeiro", "Mercado Pago", "🔴 Análise Limbo", "IA"],
+        options=[
+            "Marketing Diário",
+            "Marketing Semanal",
+            "Marketing",
+            "Geral",
+            "Financeiro",
+            "Mercado Pago",
+        ],
         index=0,
         label_visibility="collapsed",
-    )
-    include_github_history_ia = st.sidebar.checkbox(
-        "IA: incluir histórico GitHub (2023-2025)",
-        value=True,
     )
     st.sidebar.markdown("### Arquivo acessório Mercado Pago")
     uploaded_mp_input = st.sidebar.file_uploader(
@@ -4002,19 +4672,9 @@ def main() -> None:
         accept_multiple_files=False,
         key="mercado_pago_file",
     )
-    st.sidebar.markdown("### Arquivo acessório Njuko")
-    uploaded_njuko_input = st.sidebar.file_uploader(
-        "Arquivo financeiro Njuko (xlsx)",
-        type=["xlsx"],
-        accept_multiple_files=False,
-        key="njuko_file",
-    )
     if uploaded_mp_input is not None:
         st.session_state["mercado_pago_file_bytes"] = uploaded_mp_input.getvalue()
         st.session_state["mercado_pago_file_name"] = uploaded_mp_input.name
-    if uploaded_njuko_input is not None:
-        st.session_state["njuko_file_bytes"] = uploaded_njuko_input.getvalue()
-        st.session_state["njuko_file_name"] = uploaded_njuko_input.name
 
     uploaded_mp_file = uploaded_mp_input
     if (
@@ -4024,15 +4684,6 @@ def main() -> None:
     ):
         uploaded_mp_file = BytesIO(st.session_state["mercado_pago_file_bytes"])
         uploaded_mp_file.name = st.session_state["mercado_pago_file_name"]
-
-    uploaded_njuko_file = uploaded_njuko_input
-    if (
-        uploaded_njuko_file is None
-        and "njuko_file_bytes" in st.session_state
-        and "njuko_file_name" in st.session_state
-    ):
-        uploaded_njuko_file = BytesIO(st.session_state["njuko_file_bytes"])
-        uploaded_njuko_file.name = st.session_state["njuko_file_name"]
 
     percurso_targets = DEFAULT_PERCURSO_TARGETS.copy()
     start_date = date(2026, 2, 23)
@@ -4056,7 +4707,12 @@ def main() -> None:
         help="Ajusta largura, expande seções e melhora paginação para exportação em PDF.",
     )
     st.session_state["print_mode"] = print_mode
-    apply_print_css(print_mode)
+    report_mode_for_pdf: str | None = None
+    if tipo_relatorio == "Marketing Diário":
+        report_mode_for_pdf = "diario"
+    elif tipo_relatorio == "Marketing Semanal":
+        report_mode_for_pdf = "semanal"
+    apply_print_css(print_mode, report_mode=report_mode_for_pdf)
     if print_mode:
         st.sidebar.caption("Recomendado: usar escala entre 95% e 100% no salvar como PDF do navegador.")
     print_button_label = "Gerar PDF (layout otimizado)" if print_mode else "Imprimir / Exportar PDF"
@@ -4075,11 +4731,6 @@ def main() -> None:
     if uploaded_mp_file:
         df_mp = load_mercado_pago_file(uploaded_mp_file)
         mp_source_name = uploaded_mp_file.name
-    df_njuko: pd.DataFrame | None = None
-    njuko_source_name = ""
-    if uploaded_njuko_file:
-        df_njuko = load_njuko_file(uploaded_njuko_file)
-        njuko_source_name = uploaded_njuko_file.name
 
     if tipo_relatorio == "Mercado Pago":
         st.markdown("<div id='print-content'>", unsafe_allow_html=True)
@@ -4087,40 +4738,6 @@ def main() -> None:
             st.info("Envie o arquivo de vendas Mercado Pago para ver esta aba.")
         else:
             render_dashboard_mercado_pago(df_mp, mp_source_name)
-        st.markdown("</div>", unsafe_allow_html=True)
-        return
-
-    if tipo_relatorio == "🔴 Análise Limbo":
-        st.markdown("<div id='print-content'>", unsafe_allow_html=True)
-        if (df_mp is None and df_njuko is not None) or (df_mp is not None and df_njuko is None):
-            st.warning(
-                "Para rodar a Análise Limbo, envie os dois arquivos: Mercado Pago e Njuko (formato .xlsx)."
-            )
-        elif df_mp is None and df_njuko is None:
-            st.info("Envie os arquivos de Mercado Pago e Njuko para iniciar a Análise Limbo.")
-        else:
-            limbo_summary = render_dashboard_analise_limbo(
-                df_mp=df_mp,
-                df_njuko=df_njuko,
-                mp_source_name=mp_source_name,
-                njuko_source_name=njuko_source_name,
-            )
-            if limbo_summary.get("ok"):
-                st.success(
-                    "Cross-check concluído: "
-                    f"{format_int(limbo_summary['total_limbo'])} atletas no limbo, "
-                    f"com {format_currency_brl_2(limbo_summary['valor_risco'])} em risco."
-                )
-        st.markdown("</div>", unsafe_allow_html=True)
-        return
-
-    if tipo_relatorio == "IA":
-        st.markdown("<div id='print-content'>", unsafe_allow_html=True)
-        ia_full_df, ia_filtered_df = build_ia_base(
-            uploaded_full_df=full_df,
-            include_github_history=include_github_history_ia,
-        )
-        render_dashboard_ia(full_df=ia_full_df, filtered_df=ia_filtered_df, mp_df=df_mp)
         st.markdown("</div>", unsafe_allow_html=True)
         return
 
@@ -4150,20 +4767,26 @@ def main() -> None:
 
     ibge_df = load_ibge()
     st.markdown("<div id='print-content'>", unsafe_allow_html=True)
-    if tipo_relatorio == "Geral":
-        render_header(scoped, data_base_label)
-        render_venn_unique_athletes(full_df)
-        insert_print_break(print_mode)
-        render_progress_projection(scoped, percurso_targets, start_date, end_date)
-        render_demography(scoped)
-        insert_print_break(print_mode)
-        render_geography(scoped, ibge_df)
-        render_international(scoped)
-        render_sales_patterns(scoped)
-        insert_print_break(print_mode)
-        render_financial(scoped)
-        render_nubank_section(scoped, ibge_df)
-        render_exports(full_df, scoped)
+    if tipo_relatorio == "Marketing Diário":
+        render_marketing_diario(
+            scoped=scoped,
+            full_df=full_df,
+            percurso_targets=percurso_targets,
+            data_base_label=data_base_label,
+            data_base_ts=data_base_ts,
+        )
+    elif tipo_relatorio == "Marketing Semanal":
+        render_marketing_semanal(
+            scoped=scoped,
+            full_df=full_df,
+            percurso_targets=percurso_targets,
+            start_date=start_date,
+            end_date=end_date,
+            data_base_label=data_base_label,
+            data_base_ts=data_base_ts,
+            ibge_df=ibge_df,
+            print_mode=print_mode,
+        )
     elif tipo_relatorio == "Marketing":
         render_header_marketing(scoped, data_base_label)
         render_progress_projection(scoped, percurso_targets, start_date, end_date)
@@ -4180,6 +4803,20 @@ def main() -> None:
         render_yopp_section(scoped, ibge_df)
         render_nubank_section(scoped, ibge_df)
         render_perfil_inscrito(scoped, ibge_df)
+    elif tipo_relatorio == "Geral":
+        render_header(scoped, data_base_label)
+        render_venn_unique_athletes(full_df)
+        insert_print_break(print_mode)
+        render_progress_projection(scoped, percurso_targets, start_date, end_date)
+        render_demography(scoped)
+        insert_print_break(print_mode)
+        render_geography(scoped, ibge_df)
+        render_international(scoped)
+        render_sales_patterns(scoped)
+        insert_print_break(print_mode)
+        render_financial(scoped)
+        render_nubank_section(scoped, ibge_df)
+        render_exports(full_df, scoped)
     else:
         render_header_financial(scoped, data_base_label)
         insert_print_break(print_mode)
