@@ -7,6 +7,7 @@ import difflib
 from datetime import date, datetime
 from io import BytesIO
 from pathlib import Path
+from typing import Literal
 
 import pandas as pd
 import plotly.express as px
@@ -199,7 +200,8 @@ def apply_theme() -> None:
 def apply_print_css(print_mode: bool = False, report_mode: str | None = None) -> None:
     """Injeta CSS de impressão.
 
-    `report_mode` pode ser "diario" (1 página, sem quebras forçadas) ou
+    `report_mode` pode ser "diario" (1 página, sem quebras forçadas),
+    "diario_executivo" (diário completo, quebras como o semanal) ou
     "semanal" (multipágina, quebra antes de cada h2 para manter blocos íntegros).
     Para os demais relatórios o comportamento original é mantido.
     """
@@ -245,6 +247,31 @@ def apply_print_css(print_mode: bool = False, report_mode: str | None = None) ->
           #print-content h2, #print-content h3 {
             page-break-before: auto !important;
             break-before: auto !important;
+          }
+        """
+    elif report_mode == "diario_executivo":
+        mode_specific_css = """
+          /* Diário executivo: vários blocos — mesma paginação por h2 que o semanal. */
+          #print-content h2 {
+            page-break-before: always !important;
+            break-before: page !important;
+          }
+          #print-content > div:first-of-type h2,
+          #print-content .hero + * h2:first-of-type {
+            page-break-before: avoid !important;
+            break-before: avoid-page !important;
+          }
+          #print-content .element-container,
+          #print-content .stTable,
+          #print-content .plotly-graph-div,
+          #print-content div[data-testid="stMetric"],
+          #print-content .highlight-card {
+            page-break-inside: avoid !important;
+            break-inside: avoid-page !important;
+          }
+          #print-content .mkt-kpi-card, #print-content .mkt-kpi-wrap {
+            page-break-inside: avoid !important;
+            break-inside: avoid-page !important;
           }
         """
     elif report_mode == "semanal":
@@ -2149,109 +2176,275 @@ def render_marketing_highlights(highlights: list[dict[str, str]]) -> None:
         )
 
 
-def render_marketing_diario(
+def _daily_metric_flag_count(frame: pd.DataFrame, col: str) -> int:
+    if col not in frame.columns:
+        return 0
+    return int(pd.to_numeric(frame[col], errors="coerce").fillna(0).gt(0).sum())
+
+
+def _build_marketing_diario_kpi_items(
     scoped: pd.DataFrame,
-    full_df: pd.DataFrame,
+    today_df: pd.DataFrame,
+    deltas: dict[str, object],
     percurso_targets: dict[str, int],
-    data_base_label: str,
-    data_base_ts: pd.Timestamp | None = None,
-) -> None:
-    """Visão executiva diária — KPIs essenciais + ritmo + 3 destaques + PDF dedicado."""
-    inject_marketing_report_styles()
-    deltas = compute_daily_deltas(scoped, data_base_ts)
-    ref_day: date = deltas["ref_day"]  # type: ignore[assignment]
-    weekday_label = deltas["weekday_label"]
-    title = "Marketing Diário — Paraty Brazil by UTMB"
-    subtitle = (
-        f"{weekday_label}, {ref_day.strftime('%d/%m/%Y')} | "
-        f"Base atualizada até {data_base_label}"
-    )
-    _render_report_hero(badge="DIÁRIO", badge_color=BRAND_COLORWAY[0], title=title, subtitle=subtitle)
-
-    with st.container():
-        button_col_left, button_col_right = st.columns([3, 1])
-        with button_col_left:
-            st.caption(
-                "Visão de 1 página com inscritos, ritmo e progresso de metas — pensada para checagem rápida e envio."
-            )
-        with button_col_right:
-            _render_pdf_button("Baixar PDF do Diário", key="pdf_marketing_diario")
-
+) -> list[dict[str, object]]:
+    """KPIs do Marketing Diário — apenas contagens e percentuais (sem valores financeiros)."""
     total_inscritos = int(len(scoped))
-    receita_total = float(scoped["net_revenue_brl"].sum()) if "net_revenue_brl" in scoped.columns else 0.0
+    summary = build_route_summary(scoped, percurso_targets)
+    total_row = summary[summary["Percurso"] == "TOTAL"].iloc[0] if not summary.empty else None
+    pct_meta_total = float(total_row["pct_meta"]) if total_row is not None else 0.0
+
     female = count_female_entries(scoped)
     pct_female = (female / total_inscritos * 100) if total_inscritos else 0
     foreigners = (
         scoped[scoped["nationality_std"] != "BR"].shape[0] if "nationality_std" in scoped.columns else 0
     )
     pct_foreigners = (foreigners / total_inscritos * 100) if total_inscritos else 0
-    summary = build_route_summary(scoped, percurso_targets)
-    total_row = summary[summary["Percurso"] == "TOTAL"].iloc[0] if not summary.empty else None
-    pct_meta_total = float(total_row["pct_meta"]) if total_row is not None else 0.0
-
-    delta_inscritos = int(deltas["delta_inscritos"])  # type: ignore[arg-type]
-    delta_receita = float(deltas["delta_receita"])  # type: ignore[arg-type]
-    inscritos_hoje = int(deltas["inscritos_hoje"])  # type: ignore[arg-type]
-    receita_hoje = float(deltas["receita_hoje"])  # type: ignore[arg-type]
-
-    render_marketing_kpi_cards(
-        [
-            {
-                "label": "Inscritos hoje",
-                "value": format_int(inscritos_hoje),
-                "delta": f"{delta_inscritos:+d} vs ontem",
-            },
-            {"label": "Inscritos total", "value": format_int(total_inscritos)},
-            {
-                "label": "% meta total",
-                "value": format_pct(pct_meta_total),
-                "help": "Inscritos atuais ÷ soma das metas por percurso.",
-            },
-            {
-                "label": "Receita líquida hoje",
-                "value": format_currency(receita_hoje),
-                "delta": f"{delta_receita:+,.0f}".replace(",", ".") + " R$ vs ontem",
-            },
-            {"label": "Receita líquida total", "value": format_currency(receita_total)},
-            {"label": "% mulheres", "value": format_pct(pct_female)},
-            {"label": "% estrangeiros", "value": format_pct(pct_foreigners)},
-            {
-                "label": "Δ ontem",
-                "value": f"{delta_inscritos:+d}",
-                "help": "Variação absoluta de inscritos hoje vs ontem.",
-            },
-        ]
+    coupon_share = (
+        int(scoped["total_discounts_brl"].gt(0).sum()) / total_inscritos * 100
+        if total_inscritos and "total_discounts_brl" in scoped.columns
+        else 0.0
     )
 
-    st.markdown("---")
-    chart_col, hl_col = st.columns([3, 2])
-    with chart_col:
-        progress_fig = _build_route_progress_bars(summary)
-        st.plotly_chart(progress_fig, use_container_width=True)
-        pace_fig = _build_pace_chart(scoped)
-        if pace_fig is not None:
-            st.plotly_chart(pace_fig, use_container_width=True)
-        else:
-            st.info("Sem datas válidas para montar o gráfico de ritmo dos últimos 14 dias.")
-    with hl_col:
-        st.markdown('<div class="mkt-section-title">Destaques do dia</div>', unsafe_allow_html=True)
-        highlights = compute_marketing_highlights(
-            scoped, granularidade="diario", ref_ts=data_base_ts, targets=percurso_targets
+    delta_inscritos = int(deltas["delta_inscritos"])  # type: ignore[arg-type]
+    inscritos_hoje = int(deltas["inscritos_hoje"])  # type: ignore[arg-type]
+
+    yopp_hoje = _daily_metric_flag_count(today_df, "yopp_flag")
+    yopp_acumulado = _daily_metric_flag_count(scoped, "yopp_flag")
+    nubank_hoje = int(nubank_card_payment_registration_mask(today_df).sum())
+    nubank_acumulado = int(nubank_card_payment_registration_mask(scoped).sum())
+    bus_hoje = _daily_metric_flag_count(today_df, "official_bus_flag")
+    bus_acumulado = _daily_metric_flag_count(scoped, "official_bus_flag")
+
+    if "country_std" in scoped.columns:
+        paises_acumulado = int(
+            scoped["country_std"].replace({"": pd.NA, "NAN": pd.NA}).dropna().nunique()
         )
-        if highlights:
-            for item in highlights:
-                st.markdown(
-                    f"""
-                    <div class="highlight-card">
-                      <div class="highlight-title">{item.get('titulo', '')}</div>
-                      <div class="highlight-value">{item.get('valor', '')}</div>
-                      <div class="highlight-hint">{item.get('hint', '')}</div>
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
-                )
-        else:
-            st.caption("Sem destaques relevantes nas últimas 24h.")
+    else:
+        paises_acumulado = 0
+
+    return [
+        {
+            "label": "Inscritos hoje",
+            "value": format_int(inscritos_hoje),
+            "delta": f"{delta_inscritos:+d} vs ontem",
+        },
+        {"label": "Inscritos total", "value": format_int(total_inscritos)},
+        {
+            "label": "% meta total",
+            "value": format_pct(pct_meta_total),
+            "help": "Inscritos atuais ÷ soma das metas por percurso.",
+        },
+        {
+            "label": "Óculos Yopp vendidos (hoje)",
+            "value": format_int(yopp_hoje),
+            "delta": f"Acumulado: {format_int(yopp_acumulado)}",
+        },
+        {
+            "label": "Pagamentos cartão Nubank (hoje)",
+            "value": format_int(nubank_hoje),
+            "delta": f"Acumulado: {format_int(nubank_acumulado)}",
+            "help": "nubank_flag ativo e sem cupom válido (código ≥3 caracteres alfanuméricos normalizado).",
+        },
+        {
+            "label": "Interessados no ônibus oficial (hoje)",
+            "value": format_int(bus_hoje),
+            "delta": f"Acumulado: {format_int(bus_acumulado)}",
+        },
+        {
+            "label": "Países diferentes (acumulado)",
+            "value": format_int(paises_acumulado),
+            "help": "Países distintos entre todos os inscritos.",
+        },
+        {"label": "% mulheres (acumulado)", "value": format_pct(pct_female)},
+        {"label": "% estrangeiros (acumulado)", "value": format_pct(pct_foreigners)},
+        {
+            "label": "% c/ cupom (acumulado)",
+            "value": format_pct(coupon_share),
+            "help": "Inscrições com qualquer desconto aplicado.",
+        },
+    ]
+
+
+def _render_daily_inscritos_compare_chart(inscritos_ontem: int, inscritos_hoje: int) -> None:
+    """Barras agrupadas: ontem vs hoje (apenas inscrições, sem receita)."""
+    max_pair = max(float(inscritos_ontem), float(inscritos_hoje), 1.0)
+    col_ant = BRAND_COLORWAY[3]
+    col_cur = BRAND_COLORWAY[0]
+    fig = go.Figure()
+    fig.add_trace(
+        go.Bar(
+            name="Ontem",
+            x=["Inscritos"],
+            y=[inscritos_ontem],
+            marker_color=col_ant,
+            text=[format_int(inscritos_ontem)],
+            textposition=_weekly_compare_textposition(inscritos_ontem, max_pair),
+            insidetextfont=dict(color=_inside_bar_label_color(col_ant), size=12),
+            outsidetextfont=dict(color="#334155", size=12),
+        )
+    )
+    fig.add_trace(
+        go.Bar(
+            name="Hoje",
+            x=["Inscritos"],
+            y=[inscritos_hoje],
+            marker_color=col_cur,
+            text=[format_int(inscritos_hoje)],
+            textposition=_weekly_compare_textposition(inscritos_hoje, max_pair),
+            insidetextfont=dict(color=_inside_bar_label_color(col_cur), size=12),
+            outsidetextfont=dict(color="#334155", size=12),
+        )
+    )
+    fig.update_layout(
+        barmode="group",
+        title="Inscritos — ontem vs hoje",
+        height=320,
+        yaxis_title="Inscritos",
+        showlegend=True,
+    )
+    apply_brand_chart_style(fig)
+    fig.update_layout(
+        title=dict(text="Inscritos — ontem vs hoje", x=0.5, xanchor="center"),
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.07,
+            x=0.5,
+            xanchor="center",
+            bgcolor="rgba(255,255,255,0.92)",
+            bordercolor="#e5e7eb",
+            borderwidth=1,
+        ),
+        margin=dict(t=96, b=48, l=10, r=10),
+    )
+    _polish_weekly_compare_bar_figure(fig)
+    st.plotly_chart(fig, use_container_width=True)
+
+
+def render_marketing_diario(
+    scoped: pd.DataFrame,
+    full_df: pd.DataFrame,
+    percurso_targets: dict[str, int],
+    data_base_label: str,
+    data_base_ts: pd.Timestamp | None = None,
+    *,
+    variant: Literal["flash", "executivo"] = "flash",
+    start_date: date | None = None,
+    end_date: date | None = None,
+    ibge_df: pd.DataFrame | None = None,
+    print_mode: bool = False,
+) -> None:
+    """Marketing Diário — Flash (1 página, checagem rápida) ou Executivo (espelho analítico do semanal, sem finanças)."""
+    inject_marketing_report_styles()
+    deltas = compute_daily_deltas(scoped, data_base_ts)
+    ref_day: date = deltas["ref_day"]  # type: ignore[assignment]
+    weekday_label = deltas["weekday_label"]
+    today_df = _filter_by_day(scoped, ref_day)
+    inscritos_ontem = int(deltas["inscritos_ontem"])  # type: ignore[arg-type]
+
+    badge_flash = "DIÁRIO · FLASH"
+    badge_exec = "DIÁRIO · EXECUTIVO"
+    title_flash = "Marketing Diário — Flash"
+    title_exec = "Marketing Diário — Executivo"
+    title = title_flash if variant == "flash" else title_exec
+    badge = badge_flash if variant == "flash" else badge_exec
+    subtitle = (
+        f"{weekday_label}, {ref_day.strftime('%d/%m/%Y')} | "
+        f"Base atualizada até {data_base_label}"
+    )
+    _render_report_hero(badge=badge, badge_color=BRAND_COLORWAY[0], title=title, subtitle=subtitle)
+
+    pdf_label = "Baixar PDF do Diário (Flash)" if variant == "flash" else "Baixar PDF do Diário (Executivo)"
+    pdf_key = "pdf_marketing_diario_flash" if variant == "flash" else "pdf_marketing_diario_executivo"
+
+    caption_flash = (
+        "Visão compacta: KPIs, progresso por percurso, ritmo 14 dias, ontem vs hoje e destaques — sem valores em R$."
+    )
+    caption_exec = (
+        "Relatório completo do dia: mesmos blocos analíticos do semanal (metas, gaujes, demografia, Brasil, "
+        "internacional, cupons), sem comparativos nem KPIs de receita."
+    )
+
+    with st.container():
+        button_col_left, button_col_right = st.columns([3, 1])
+        with button_col_left:
+            st.caption(caption_flash if variant == "flash" else caption_exec)
+        with button_col_right:
+            _render_pdf_button(pdf_label, key=pdf_key)
+
+    kpi_items = _build_marketing_diario_kpi_items(scoped, today_df, deltas, percurso_targets)
+    render_marketing_kpi_cards(kpi_items)
+
+    summary = build_route_summary(scoped, percurso_targets)
+
+    if variant == "flash":
+        st.markdown("---")
+        chart_col, hl_col = st.columns([3, 2])
+        with chart_col:
+            progress_fig = _build_route_progress_bars(summary)
+            st.plotly_chart(progress_fig, use_container_width=True)
+            _render_daily_inscritos_compare_chart(inscritos_ontem, int(deltas["inscritos_hoje"]))  # type: ignore[arg-type]
+            pace_fig = _build_pace_chart(scoped)
+            if pace_fig is not None:
+                st.plotly_chart(pace_fig, use_container_width=True)
+            else:
+                st.info("Sem datas válidas para montar o gráfico de ritmo dos últimos 14 dias.")
+        with hl_col:
+            st.markdown('<div class="mkt-section-title">Destaques do dia</div>', unsafe_allow_html=True)
+            highlights = compute_marketing_highlights(
+                scoped, granularidade="diario", ref_ts=data_base_ts, targets=percurso_targets
+            )
+            if highlights:
+                for item in highlights:
+                    st.markdown(
+                        f"""
+                        <div class="highlight-card">
+                          <div class="highlight-title">{item.get('titulo', '')}</div>
+                          <div class="highlight-value">{item.get('valor', '')}</div>
+                          <div class="highlight-hint">{item.get('hint', '')}</div>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+            else:
+                st.caption("Sem destaques relevantes nas últimas 24h.")
+        return
+
+    # --- Executivo ---
+    if start_date is None or end_date is None or ibge_df is None:
+        st.error("Configuração incompleta: datas de campanha e IBGE são necessários para o Diário Executivo.")
+        return
+
+    st.markdown('<div class="mkt-section-title">Destaques do dia</div>', unsafe_allow_html=True)
+    daily_highlights = compute_marketing_highlights(
+        scoped, granularidade="diario", ref_ts=data_base_ts, targets=percurso_targets
+    )
+    render_marketing_highlights(daily_highlights[:5])
+
+    insert_print_break(print_mode)
+    render_progress_projection(
+        scoped,
+        percurso_targets,
+        start_date,
+        end_date,
+        weekly_polish=True,
+        show_registration_cadence=True,
+        ref_ts=data_base_ts,
+    )
+    render_marketing_target_gauges(scoped, percurso_targets, weekly_polish=True)
+    insert_print_break(print_mode)
+    render_demography(scoped, expandido=True)
+    render_geography(scoped, ibge_df)
+    render_international(scoped)
+    insert_print_break(print_mode)
+    render_marketing_coupon_block(scoped)
+    render_team_medical_company(scoped)
+
+    insert_print_break(print_mode)
+    st.header("Comparativo: ontem vs hoje")
+    st.caption("Apenas volume de inscrições (sem receita).")
+    _render_daily_inscritos_compare_chart(inscritos_ontem, int(deltas["inscritos_hoje"]))  # type: ignore[arg-type]
 
 
 def render_marketing_semanal(
@@ -2414,7 +2607,13 @@ def render_marketing_semanal(
 
     insert_print_break(print_mode)
     render_progress_projection(
-        scoped, percurso_targets, start_date, end_date, weekly_polish=True
+        scoped,
+        percurso_targets,
+        start_date,
+        end_date,
+        weekly_polish=True,
+        show_registration_cadence=True,
+        ref_ts=data_base_ts,
     )
     render_marketing_target_gauges(scoped, percurso_targets, weekly_polish=True)
     insert_print_break(print_mode)
@@ -2674,6 +2873,109 @@ def build_route_summary(df: pd.DataFrame, targets: dict[str, int]) -> pd.DataFra
     return pd.concat([route_summary, total_row], ignore_index=True)
 
 
+def render_registration_cadence_charts(
+    df: pd.DataFrame,
+    start_date: date,
+    ref_ts: pd.Timestamp | None,
+) -> None:
+    """Últimas 6 semanas ISO (seg–dom) e inscrições por mês desde início da campanha."""
+    if df.empty or "Registration date" not in df.columns:
+        st.info("Sem datas de inscrição para montar os gráficos por semana/mês.")
+        return
+
+    ref_day = _resolve_reference_date(df, ref_ts)
+    reg = pd.to_datetime(df["Registration date"], errors="coerce")
+    mask_valid = reg.notna()
+    if not mask_valid.any():
+        st.info("Sem datas válidas para montar os gráficos por semana/mês.")
+        return
+
+    reg_dates = reg.dt.normalize().dt.date
+
+    st.markdown(
+        '<div class="mkt-section-title">Volume por semana e por mês</div>',
+        unsafe_allow_html=True,
+    )
+    st.caption(
+        "Seis semanas em calendário ISO (segunda a domingo), terminando na semana da data de referência. "
+        "Meses alinhados ao início da campanha na barra lateral."
+    )
+
+    cur_monday = ref_day - pd.Timedelta(days=ref_day.weekday()).to_pytimedelta()
+    week_x: list[str] = []
+    week_y: list[int] = []
+    week_cd: list[tuple[str, str]] = []
+    for offset in range(5, -1, -1):
+        ws = cur_monday - pd.Timedelta(days=7 * offset).to_pytimedelta()
+        we = ws + pd.Timedelta(days=6).to_pytimedelta()
+        iso_y, iso_w, _ = ws.isocalendar()
+        cnt = int(((reg_dates >= ws) & (reg_dates <= we)).sum())
+        week_x.append(f"S{iso_w:02d}/{iso_y}")
+        week_y.append(cnt)
+        week_cd.append((ws.strftime("%d/%m/%Y"), we.strftime("%d/%m/%Y")))
+
+    fig_w = go.Figure(
+        go.Bar(
+            x=week_x,
+            y=week_y,
+            marker_color=BRAND_COLORWAY[0],
+            text=[format_int(c) for c in week_y],
+            textposition="outside",
+            cliponaxis=False,
+            customdata=week_cd,
+            hovertemplate=(
+                "<b>%{x}</b><br>%{customdata[0]} – %{customdata[1]}<br>"
+                "Inscritos: %{y}<extra></extra>"
+            ),
+        )
+    )
+    fig_w.update_layout(
+        title="Inscritos por semana — últimas 6 semanas",
+        yaxis_title="Inscritos",
+        xaxis_title="Semana ISO",
+        height=340,
+        margin=dict(t=56, b=48),
+    )
+    apply_brand_chart_style(fig_w)
+    st.plotly_chart(fig_w, use_container_width=True)
+
+    start_period = pd.Timestamp(start_date).to_period("M")
+    end_period = pd.Timestamp(ref_day).to_period("M")
+    if start_period > end_period:
+        st.warning("Início da campanha está depois da data de referência; gráfico mensal omitido.")
+        return
+
+    months_idx = pd.period_range(start=start_period, end=end_period, freq="M")
+    sub = df.loc[mask_valid].copy()
+    sub["_m"] = pd.to_datetime(sub["Registration date"], errors="coerce").dt.to_period("M")
+    month_counts = sub.groupby("_m").size().reindex(months_idx, fill_value=0).astype(int)
+    month_labels = [f"{p.month:02d}/{p.year}" for p in months_idx]
+
+    fig_m = go.Figure(
+        go.Bar(
+            x=month_labels,
+            y=month_counts.values,
+            marker_color=BRAND_COLORWAY[1],
+            text=[format_int(int(v)) for v in month_counts.values],
+            textposition="outside",
+            cliponaxis=False,
+            hovertemplate="Mês: %{x}<br>Inscritos: %{y}<extra></extra>",
+        )
+    )
+    fig_m.update_layout(
+        title=(
+            f"Inscritos por mês — desde {start_date.strftime('%d/%m/%Y')} "
+            f"(até {ref_day.strftime('%d/%m/%Y')})"
+        ),
+        xaxis_title="Mês",
+        yaxis_title="Inscritos",
+        height=360,
+        margin=dict(t=56, b=56),
+    )
+    apply_brand_chart_style(fig_m)
+    st.plotly_chart(fig_m, use_container_width=True)
+
+
 def render_progress_projection(
     df: pd.DataFrame,
     targets: dict[str, int],
@@ -2681,6 +2983,9 @@ def render_progress_projection(
     end_date: date,
     show_target_gauges: bool = False,
     weekly_polish: bool = False,
+    *,
+    show_registration_cadence: bool = False,
+    ref_ts: pd.Timestamp | None = None,
 ) -> None:
     st.header("Projeções e ritmo de vendas")
     summary = build_route_summary(df, targets)
@@ -2707,6 +3012,8 @@ def render_progress_projection(
         )
         fig_metas = build_weekly_metas_bullet_figure(summary)
         st.plotly_chart(fig_metas, use_container_width=True)
+        if show_registration_cadence:
+            render_registration_cadence_charts(df, start_date, ref_ts)
     else:
         # Grafico 100% empilhado: todas as barras com mesma altura visual (0 a 100%)
         chart_summary = summary.copy()
@@ -2770,6 +3077,8 @@ def render_progress_projection(
             margin=dict(b=80),
         )
         st.plotly_chart(fig_comp, use_container_width=True)
+        if show_registration_cadence:
+            render_registration_cadence_charts(df, start_date, ref_ts)
 
     if show_target_gauges:
         st.subheader("Gauges de meta por percurso e total")
@@ -4655,7 +4964,8 @@ def main() -> None:
     tipo_relatorio = st.sidebar.radio(
         "Selecione o relatório",
         options=[
-            "Marketing Diário",
+            "Marketing Diário — Flash",
+            "Marketing Diário — Executivo",
             "Marketing Semanal",
             "Marketing",
             "Geral",
@@ -4708,8 +5018,10 @@ def main() -> None:
     )
     st.session_state["print_mode"] = print_mode
     report_mode_for_pdf: str | None = None
-    if tipo_relatorio == "Marketing Diário":
+    if tipo_relatorio == "Marketing Diário — Flash":
         report_mode_for_pdf = "diario"
+    elif tipo_relatorio == "Marketing Diário — Executivo":
+        report_mode_for_pdf = "diario_executivo"
     elif tipo_relatorio == "Marketing Semanal":
         report_mode_for_pdf = "semanal"
     apply_print_css(print_mode, report_mode=report_mode_for_pdf)
@@ -4767,13 +5079,27 @@ def main() -> None:
 
     ibge_df = load_ibge()
     st.markdown("<div id='print-content'>", unsafe_allow_html=True)
-    if tipo_relatorio == "Marketing Diário":
+    if tipo_relatorio == "Marketing Diário — Flash":
         render_marketing_diario(
             scoped=scoped,
             full_df=full_df,
             percurso_targets=percurso_targets,
             data_base_label=data_base_label,
             data_base_ts=data_base_ts,
+            variant="flash",
+        )
+    elif tipo_relatorio == "Marketing Diário — Executivo":
+        render_marketing_diario(
+            scoped=scoped,
+            full_df=full_df,
+            percurso_targets=percurso_targets,
+            data_base_label=data_base_label,
+            data_base_ts=data_base_ts,
+            variant="executivo",
+            start_date=start_date,
+            end_date=end_date,
+            ibge_df=ibge_df,
+            print_mode=print_mode,
         )
     elif tipo_relatorio == "Marketing Semanal":
         render_marketing_semanal(
