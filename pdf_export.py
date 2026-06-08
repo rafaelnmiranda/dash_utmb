@@ -23,19 +23,25 @@ def build_fig_png(fig: go.Figure, scale: int = 2) -> str:
 
             scope = PlotlyScope()
             png_bytes = scope.transform(fig, format="png", scale=scale)
-        except Exception as exc:
-            raise RuntimeError(
-                "Não foi possível converter gráfico em PNG. Verifique kaleido==0.2.1 e plotly>=5.15."
-            ) from exc
+        except Exception:
+            return ""
+    if not png_bytes:
+        return ""
     encoded = base64.b64encode(png_bytes).decode("ascii")
     return f"data:image/png;base64,{encoded}"
 
 
 def render_pdf_bytes(html_content: str) -> bytes:
     """Renderiza HTML em bytes PDF via WeasyPrint."""
-    from weasyprint import HTML
+    try:
+        from weasyprint import HTML
 
-    return HTML(string=html_content).write_pdf()
+        return HTML(string=html_content).write_pdf()
+    except (ImportError, OSError) as exc:
+        raise RuntimeError(
+            "WeasyPrint indisponível neste ambiente (libs Pango/Cairo ausentes). "
+            "No Streamlit Cloud, verifique packages.txt na raiz do repositório."
+        ) from exc
 
 
 def _df_to_html_table(df: pd.DataFrame | None, max_rows: int | None = None) -> str:
