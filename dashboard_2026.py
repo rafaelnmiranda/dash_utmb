@@ -2125,6 +2125,29 @@ def _build_pace_chart(df: pd.DataFrame, days_window: int = 14, ma_window: int = 
 _PT_WEEKDAYS_SHORT = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"]
 
 
+def _blue_gradient_colors(values) -> list[str]:
+    """Tons de azul escuro com gradação por valor: quanto maior, mais escuro.
+
+    Interpola entre um azul claro (menor valor) e um navy profundo (maior valor).
+    """
+    vals = [float(v) for v in values]
+    if not vals:
+        return []
+    vmin = min(vals)
+    vmax = max(vals)
+    span = vmax - vmin
+    light = (165, 196, 240)  # azul claro
+    dark = (8, 26, 58)       # navy profundo
+    colors: list[str] = []
+    for v in vals:
+        t = (v - vmin) / span if span > 0 else 1.0
+        r = round(light[0] + (dark[0] - light[0]) * t)
+        g = round(light[1] + (dark[1] - light[1]) * t)
+        b = round(light[2] + (dark[2] - light[2]) * t)
+        colors.append(f"#{r:02x}{g:02x}{b:02x}")
+    return colors
+
+
 def _build_daily_sales_chart(df: pd.DataFrame, days_window: int = 15) -> go.Figure | None:
     """Barras de vendas (inscrições) por dia nos últimos N dias.
 
@@ -2157,6 +2180,8 @@ def _build_daily_sales_chart(df: pd.DataFrame, days_window: int = 15) -> go.Figu
     )
     daily_full["vendas"] = daily_full["vendas"].astype(int)
 
+    bar_colors = _blue_gradient_colors(daily_full["vendas"])
+
     fig = go.Figure()
     for idx, (dia, vendas) in enumerate(zip(daily_full["_day"], daily_full["vendas"])):
         vendas = int(vendas)
@@ -2167,7 +2192,7 @@ def _build_daily_sales_chart(df: pd.DataFrame, days_window: int = 15) -> go.Figu
                 name=f"{label} ({weekday_short}): {format_int(vendas)}",
                 x=[label],
                 y=[vendas],
-                marker_color=BRAND_COLORWAY[idx % len(BRAND_COLORWAY)],
+                marker_color=bar_colors[idx],
                 text=[format_int(vendas)],
                 textposition="outside",
                 outsidetextfont=dict(color="#334155", size=12),
@@ -2492,15 +2517,6 @@ def render_marketing_diario(
     render_marketing_highlights(daily_highlights[:5])
 
     insert_print_break(print_mode)
-    st.markdown('<div class="mkt-section-title">Vendas diárias (últimos 15 dias)</div>', unsafe_allow_html=True)
-    st.caption("Vendas (inscrições) por dia. A legenda mostra a data e o nº de vendas de cada dia.")
-    daily_sales_fig = _build_daily_sales_chart(scoped, days_window=15)
-    if daily_sales_fig is not None:
-        st.plotly_chart(daily_sales_fig, use_container_width=True)
-    else:
-        st.info("Sem datas válidas para montar o gráfico de vendas dos últimos 15 dias.")
-
-    insert_print_break(print_mode)
     render_progress_projection(
         scoped,
         percurso_targets,
@@ -2508,6 +2524,7 @@ def render_marketing_diario(
         end_date,
         weekly_polish=True,
         show_registration_cadence=True,
+        daily_sales_window=15,
         ref_ts=data_base_ts,
     )
     render_marketing_target_gauges(scoped, percurso_targets, weekly_polish=True)
@@ -2955,8 +2972,13 @@ def render_registration_cadence_charts(
     df: pd.DataFrame,
     start_date: date,
     ref_ts: pd.Timestamp | None,
+    daily_sales_window: int | None = None,
 ) -> None:
-    """Últimas 6 semanas ISO (seg–dom) e inscrições por mês desde início da campanha."""
+    """Últimas 6 semanas ISO (seg–dom) e inscrições por mês desde início da campanha.
+
+    Se ``daily_sales_window`` for informado, renderiza antes o gráfico de vendas
+    diárias dos últimos N dias.
+    """
     if df.empty or "Registration date" not in df.columns:
         st.info("Sem datas de inscrição para montar os gráficos por semana/mês.")
         return
@@ -2969,6 +2991,18 @@ def render_registration_cadence_charts(
         return
 
     reg_dates = reg.dt.normalize().dt.date
+
+    if daily_sales_window:
+        st.markdown(
+            f'<div class="mkt-section-title">Vendas diárias (últimos {daily_sales_window} dias)</div>',
+            unsafe_allow_html=True,
+        )
+        st.caption("Vendas (inscrições) por dia. A legenda mostra a data e o nº de vendas de cada dia.")
+        daily_sales_fig = _build_daily_sales_chart(df, days_window=daily_sales_window)
+        if daily_sales_fig is not None:
+            st.plotly_chart(daily_sales_fig, use_container_width=True)
+        else:
+            st.info(f"Sem datas válidas para montar o gráfico de vendas dos últimos {daily_sales_window} dias.")
 
     st.markdown(
         '<div class="mkt-section-title">Volume por semana e por mês</div>',
@@ -2996,7 +3030,7 @@ def render_registration_cadence_charts(
         go.Bar(
             x=week_x,
             y=week_y,
-            marker_color=BRAND_COLORWAY[0],
+            marker_color=_blue_gradient_colors(week_y),
             text=[format_int(c) for c in week_y],
             textposition="outside",
             cliponaxis=False,
@@ -3063,6 +3097,7 @@ def render_progress_projection(
     weekly_polish: bool = False,
     *,
     show_registration_cadence: bool = False,
+    daily_sales_window: int | None = None,
     ref_ts: pd.Timestamp | None = None,
 ) -> None:
     st.header("Projeções e ritmo de vendas")
@@ -3091,7 +3126,7 @@ def render_progress_projection(
         fig_metas = build_weekly_metas_bullet_figure(summary)
         st.plotly_chart(fig_metas, use_container_width=True)
         if show_registration_cadence:
-            render_registration_cadence_charts(df, start_date, ref_ts)
+            render_registration_cadence_charts(df, start_date, ref_ts, daily_sales_window)
     else:
         # Grafico 100% empilhado: todas as barras com mesma altura visual (0 a 100%)
         chart_summary = summary.copy()
@@ -3156,7 +3191,7 @@ def render_progress_projection(
         )
         st.plotly_chart(fig_comp, use_container_width=True)
         if show_registration_cadence:
-            render_registration_cadence_charts(df, start_date, ref_ts)
+            render_registration_cadence_charts(df, start_date, ref_ts, daily_sales_window)
 
     if show_target_gauges:
         st.subheader("Gauges de meta por percurso e total")
