@@ -2122,6 +2122,76 @@ def _build_pace_chart(df: pd.DataFrame, days_window: int = 14, ma_window: int = 
     return fig
 
 
+_PT_WEEKDAYS_SHORT = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"]
+
+
+def _build_daily_sales_chart(df: pd.DataFrame, days_window: int = 15) -> go.Figure | None:
+    """Barras de vendas (inscrições) por dia nos últimos N dias.
+
+    Cada dia é um item separado na legenda (data + nº de vendas), facilitando
+    identificar quantas vendas houve em cada dia. None se não houver datas válidas.
+    """
+    if "Registration date" not in df.columns:
+        return None
+    series = pd.to_datetime(df["Registration date"], errors="coerce")
+    valid_df = df.assign(_day=series.dt.date).dropna(subset=["_day"])
+    if valid_df.empty:
+        return None
+
+    max_day = max(valid_df["_day"])
+    start_day = max_day - pd.Timedelta(days=days_window - 1).to_pytimedelta()
+    daily = (
+        valid_df[valid_df["_day"].between(start_day, max_day)]
+        .groupby("_day")
+        .size()
+        .rename("vendas")
+        .reset_index()
+    )
+
+    full_index = pd.date_range(start=start_day, end=max_day, freq="D").date
+    daily_full = (
+        pd.DataFrame({"_day": full_index})
+        .merge(daily, on="_day", how="left")
+        .fillna({"vendas": 0})
+        .sort_values("_day")
+    )
+    daily_full["vendas"] = daily_full["vendas"].astype(int)
+
+    fig = go.Figure()
+    for idx, row in enumerate(daily_full.itertuples(index=False)):
+        dia = row._day
+        vendas = int(row.vendas)
+        label = dia.strftime("%d/%m")
+        weekday_short = _PT_WEEKDAYS_SHORT[dia.weekday()]
+        fig.add_trace(
+            go.Bar(
+                name=f"{label} ({weekday_short}): {format_int(vendas)}",
+                x=[label],
+                y=[vendas],
+                marker_color=BRAND_COLORWAY[idx % len(BRAND_COLORWAY)],
+                text=[format_int(vendas)],
+                textposition="outside",
+                outsidetextfont=dict(color="#334155", size=12),
+                hovertemplate=f"{label} ({weekday_short})<br>%{{y}} vendas<extra></extra>",
+            )
+        )
+
+    fig.update_layout(
+        title=f"Vendas por dia — últimos {days_window} dias",
+        barmode="group",
+        height=380,
+        showlegend=True,
+        xaxis=dict(title="Dia", type="category"),
+        yaxis=dict(title="Vendas"),
+    )
+    apply_brand_chart_style(fig)
+    fig.update_layout(
+        showlegend=True,
+        legend=dict(orientation="h", yanchor="top", y=-0.18, xanchor="left", x=0.0),
+    )
+    return fig
+
+
 def _build_route_progress_bars(summary: pd.DataFrame) -> go.Figure:
     """Barras horizontais com % de meta por percurso (sem TOTAL)."""
     chart_df = summary[summary["Percurso"] != "TOTAL"].copy()
@@ -2421,6 +2491,15 @@ def render_marketing_diario(
         scoped, granularidade="diario", ref_ts=data_base_ts, targets=percurso_targets
     )
     render_marketing_highlights(daily_highlights[:5])
+
+    insert_print_break(print_mode)
+    st.markdown('<div class="mkt-section-title">Vendas diárias (últimos 15 dias)</div>', unsafe_allow_html=True)
+    st.caption("Vendas (inscrições) por dia. A legenda mostra a data e o nº de vendas de cada dia.")
+    daily_sales_fig = _build_daily_sales_chart(scoped, days_window=15)
+    if daily_sales_fig is not None:
+        st.plotly_chart(daily_sales_fig, use_container_width=True)
+    else:
+        st.info("Sem datas válidas para montar o gráfico de vendas dos últimos 15 dias.")
 
     insert_print_break(print_mode)
     render_progress_projection(
