@@ -2158,9 +2158,8 @@ def _build_daily_sales_chart(df: pd.DataFrame, days_window: int = 15) -> go.Figu
     daily_full["vendas"] = daily_full["vendas"].astype(int)
 
     fig = go.Figure()
-    for idx, row in enumerate(daily_full.itertuples(index=False)):
-        dia = row._day
-        vendas = int(row.vendas)
+    for idx, (dia, vendas) in enumerate(zip(daily_full["_day"], daily_full["vendas"])):
+        vendas = int(vendas)
         label = dia.strftime("%d/%m")
         weekday_short = _PT_WEEKDAYS_SHORT[dia.weekday()]
         fig.add_trace(
