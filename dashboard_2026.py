@@ -2070,6 +2070,19 @@ def _render_pdf_button(label: str, key: str) -> None:
         components.html("<script>window.print();</script>", height=0, width=0)
 
 
+def _pdf_server_side_available() -> bool:
+    """PDF server-side só funciona se weasyprint e kaleido estiverem instalados."""
+    try:
+        import importlib.util
+
+        return (
+            importlib.util.find_spec("weasyprint") is not None
+            and importlib.util.find_spec("kaleido") is not None
+        )
+    except Exception:
+        return False
+
+
 def _render_pdf_download(
     label: str,
     key: str,
@@ -2086,6 +2099,12 @@ def _render_pdf_download(
                 st.session_state[f"{key}_pdf_bytes"] = render_pdf_bytes(html)
                 st.session_state[f"{key}_pdf_name"] = file_name
                 st.session_state.pop(f"{key}_pdf_error", None)
+        except ImportError as exc:
+            st.session_state.pop(f"{key}_pdf_bytes", None)
+            st.session_state[f"{key}_pdf_error"] = (
+                f"Dependências de PDF ausentes no servidor ({exc}). "
+                "Instale weasyprint e kaleido no ambiente de deploy."
+            )
         except Exception as exc:
             st.session_state.pop(f"{key}_pdf_bytes", None)
             st.session_state[f"{key}_pdf_error"] = str(exc)
@@ -2948,7 +2967,7 @@ def render_marketing_diario(
         with button_col_left:
             st.caption(caption_flash if variant == "flash" else caption_exec)
         with button_col_right:
-            if variant == "executivo":
+            if variant == "executivo" and _pdf_server_side_available():
                 def _build_diario_executivo_html() -> str:
                     from pdf_export import build_diario_executivo_html
 
@@ -2969,6 +2988,8 @@ def render_marketing_diario(
                     html_builder=_build_diario_executivo_html,
                 )
             else:
+                if variant == "executivo":
+                    st.caption("PDF server-side indisponível neste ambiente; usando impressão do navegador.")
                 _render_pdf_button(pdf_label, key=pdf_key)
 
     kpi_items = _build_marketing_diario_kpi_items(scoped, today_df, deltas, percurso_targets)
