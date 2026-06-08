@@ -2070,6 +2070,40 @@ def _render_pdf_button(label: str, key: str) -> None:
         components.html("<script>window.print();</script>", height=0, width=0)
 
 
+def _render_pdf_download(
+    label: str,
+    key: str,
+    file_name: str,
+    html_builder,
+) -> None:
+    """Gera PDF server-side (WeasyPrint) e oferece download real."""
+    if st.button(label, key=key, use_container_width=True):
+        try:
+            with st.spinner("Gerando PDF…"):
+                from pdf_export import render_pdf_bytes
+
+                html = html_builder()
+                st.session_state[f"{key}_pdf_bytes"] = render_pdf_bytes(html)
+                st.session_state[f"{key}_pdf_name"] = file_name
+                st.session_state.pop(f"{key}_pdf_error", None)
+        except Exception as exc:
+            st.session_state.pop(f"{key}_pdf_bytes", None)
+            st.session_state[f"{key}_pdf_error"] = str(exc)
+
+    if st.session_state.get(f"{key}_pdf_error"):
+        st.error(f"Erro ao gerar PDF: {st.session_state[f'{key}_pdf_error']}")
+
+    if st.session_state.get(f"{key}_pdf_bytes"):
+        st.download_button(
+            label="⬇️ Baixar PDF gerado",
+            data=st.session_state[f"{key}_pdf_bytes"],
+            file_name=st.session_state.get(f"{key}_pdf_name", "relatorio.pdf"),
+            mime="application/pdf",
+            key=f"{key}_download",
+            use_container_width=True,
+        )
+
+
 def _build_pace_chart(df: pd.DataFrame, days_window: int = 14, ma_window: int = 7) -> go.Figure | None:
     """Linha + média móvel para os últimos N dias de inscrições. None se não houver datas."""
     if "Registration date" not in df.columns:
@@ -2360,7 +2394,7 @@ def _build_marketing_diario_kpi_items(
     ]
 
 
-def _render_daily_inscritos_compare_chart(inscritos_ontem: int, inscritos_hoje: int) -> None:
+def _build_daily_inscritos_compare_figure(inscritos_ontem: int, inscritos_hoje: int) -> go.Figure:
     """Barras agrupadas: ontem vs hoje (apenas inscrições, sem receita)."""
     max_pair = max(float(inscritos_ontem), float(inscritos_hoje), 1.0)
     col_ant = BRAND_COLORWAY[3]
@@ -2413,7 +2447,456 @@ def _render_daily_inscritos_compare_chart(inscritos_ontem: int, inscritos_hoje: 
         margin=dict(t=96, b=48, l=10, r=10),
     )
     _polish_weekly_compare_bar_figure(fig)
-    st.plotly_chart(fig, use_container_width=True)
+    return fig
+
+
+def _render_daily_inscritos_compare_chart(inscritos_ontem: int, inscritos_hoje: int) -> None:
+    st.plotly_chart(_build_daily_inscritos_compare_figure(inscritos_ontem, inscritos_hoje), use_container_width=True)
+
+
+def build_demography_bundle(df: pd.DataFrame, expandido: bool = False) -> dict[str, object]:
+    """Dados e figuras de demografia para tela e exportação PDF."""
+    valid_age = df["age"].dropna()
+    bundle: dict[str, object] = {
+        "idade_media": format_int(valid_age.mean() if not valid_age.empty else 0),
+        "idade_min": format_int(valid_age.min() if not valid_age.empty else 0),
+        "idade_max": format_int(valid_age.max() if not valid_age.empty else 0),
+        "age_hist_fig": None,
+        "gender_table": None,
+        "gender_pie_fig": None,
+        "age_table": None,
+        "age_bar_fig": None,
+        "has_age": not valid_age.empty,
+        "has_gender": False,
+    }
+    if not valid_age.empty:
+        hist = ff.create_distplot([valid_age], ["Idade"], show_hist=True, show_rug=False, bin_size=2)
+        hist.update_layout(height=320)
+        bundle["age_hist_fig"] = hist
+    if not expandido:
+        return bundle
+
+    gender_col = find_column_by_candidates(df.columns, AI_GENDER_CANDIDATES)
+    if gender_col:
+        gender_raw = df[gender_col].astype(str).str.strip().str.lower()
+        gender_norm = pd.Series(pd.NA, index=df.index, dtype="object")
+        gender_norm.loc[gender_raw.isin(AI_FEMALE_TOKENS)] = "Feminino"
+        gender_norm.loc[gender_raw.isin(AI_MALE_TOKENS)] = "Masculino"
+        gender_counts = (
+            gender_norm.dropna()
+            .value_counts()
+            .reindex(["Feminino", "Masculino"], fill_value=0)
+            .rename_axis("Gênero")
+            .reset_index(name="Inscritos")
+        )
+        total_gender = gender_counts["Inscritos"].sum()
+        gender_counts["%"] = gender_counts["Inscritos"].apply(
+            lambda v: format_pct((v / total_gender) * 100 if total_gender else 0)
+        )
+        bundle["gender_table"] = gender_counts
+        bundle["has_gender"] = not gender_counts.empty
+        pie_gender = px.pie(gender_counts, names="Gênero", values="Inscritos", hole=0.45)
+        pie_gender.update_layout(height=320)
+        bundle["gender_pie_fig"] = pie_gender
+
+    if not valid_age.empty:
+        age_labels = ["18-24", "25-34", "35-44", "45-54", "55+"]
+        age_bins = pd.cut(
+            valid_age,
+            bins=[17, 24, 34, 44, 54, 120],
+            labels=age_labels,
+            include_lowest=True,
+        )
+        age_counts = (
+            age_bins.value_counts()
+            .reindex(age_labels, fill_value=0)
+            .rename_axis("Faixa")
+            .reset_index(name="Inscritos")
+        )
+        total_age = age_counts["Inscritos"].sum()
+        age_counts["%"] = age_counts["Inscritos"].apply(
+            lambda v: format_pct((v / total_age) * 100 if total_age else 0)
+        )
+        bundle["age_table"] = age_counts
+        fig_age = px.bar(age_counts, x="Faixa", y="Inscritos", text="Inscritos")
+        fig_age = style_bar_labels(fig_age)
+        fig_age.update_layout(height=320)
+        bundle["age_bar_fig"] = fig_age
+    return bundle
+
+
+def build_geography_bundle(df: pd.DataFrame, ibge_df: pd.DataFrame) -> dict[str, object] | None:
+    """Tabelas e figuras de geografia Brasil para tela e exportação PDF."""
+    brazil = df[df["country_std"].isin(["BRAZIL", "BRASIL", "BR"])].copy()
+    if brazil.empty:
+        return None
+
+    city_choices = ibge_df["City_norm"].tolist()
+    brazil["city_display"] = brazil["city"].astype(str).apply(lambda c: correct_city(c, ibge_df, city_choices))
+    brazil["city_norm"] = brazil["city_display"].map(norm_text)
+    total_brazil = len(brazil)
+    city_counts = brazil["city_display"].value_counts().rename_axis("Cidade").reset_index(name="Inscritos")
+    city_counts["% brasileiros"] = city_counts["Inscritos"].apply(lambda v: format_pct((v / total_brazil) * 100))
+
+    merged = brazil.merge(ibge_df[["City_norm", "UF", "Região"]], left_on="city_norm", right_on="City_norm", how="left")
+    uf_counts = merged["UF"].fillna("NA").value_counts().rename_axis("UF").reset_index(name="Inscritos")
+    uf_counts["% brasileiros"] = uf_counts["Inscritos"].apply(lambda v: format_pct((v / total_brazil) * 100))
+    uf_counts = uf_counts.sort_values("Inscritos", ascending=False)
+    reg_counts = merged["Região"].fillna("NA").value_counts().rename_axis("Regiao").reset_index(name="Inscritos")
+    pie = px.pie(reg_counts, names="Regiao", values="Inscritos", hole=0.4)
+    pie.update_layout(height=320)
+
+    return {
+        "n_cidades": int(brazil["city_display"].nunique()),
+        "n_ufs": int(merged["UF"].fillna("NA").nunique()),
+        "city_counts": city_counts,
+        "uf_counts": uf_counts,
+        "reg_counts": reg_counts.sort_values("Inscritos", ascending=False),
+        "reg_pie_fig": pie,
+    }
+
+
+def build_international_bundle(df: pd.DataFrame) -> dict[str, object] | None:
+    """Tabelas de inscritos internacionais para tela e exportação PDF."""
+    intl = df[df["nationality_std"] != "BR"].copy()
+    if intl.empty:
+        return None
+
+    total_inscritos = len(df)
+    nat_counts = intl["nationality_std"].fillna("NA").value_counts().rename_axis("País").reset_index(name="Inscritos")
+    top_5 = nat_counts.head(5).copy()
+    top_5["% dos inscritos totais"] = top_5["Inscritos"].apply(lambda v: format_pct((v / total_inscritos) * 100))
+    full = nat_counts.copy()
+    full["% dos inscritos totais"] = full["Inscritos"].apply(lambda v: format_pct((v / total_inscritos) * 100))
+    return {"top_5": top_5, "full": full}
+
+
+def build_coupon_bundle(df: pd.DataFrame) -> dict[str, object] | None:
+    """Métricas, tabelas e gráfico de cupons para tela e exportação PDF."""
+    coupon_code_clean = df["coupon_code"].fillna("").astype(str).str.strip()
+    coupon_code_clean = coupon_code_clean.replace({"nan": "", "None": "", "none": ""})
+    coupon_code_norm = coupon_code_clean.str.upper().str.replace(r"[^A-Z0-9]", "", regex=True)
+    coupons = df[coupon_code_norm.str.len().ge(3)].copy()
+    if coupons.empty:
+        return None
+
+    coupons["coupon_code_norm"] = coupon_code_norm.loc[coupons.index]
+    coupons["coupon_category"] = coupons["coupon_code_norm"].str[:3]
+
+    total_coupons_used = int(len(coupons))
+    unique_coupons = int(coupons["coupon_code_norm"].nunique())
+    unique_categories = int(coupons["coupon_category"].nunique())
+    brl_used = int(coupons["edition_currency"].eq("BRL").sum())
+    usd_used = int(coupons["edition_currency"].eq("USD").sum())
+
+    by_currency = (
+        coupons.groupby("edition_currency", dropna=False)
+        .agg(usos=("edition_currency", "size"))
+        .reset_index()
+        .sort_values("usos", ascending=False)
+    )
+    by_currency["% do uso"] = by_currency["usos"].apply(
+        lambda value: format_pct((value / total_coupons_used * 100) if total_coupons_used else 0)
+    )
+    currency_table = by_currency.rename(columns={"edition_currency": "Planilha", "usos": "Cupons usados"})
+    currency_table["Planilha"] = currency_table["Planilha"].replace({"BRL": "BRL", "USD": "US"})
+    currency_table["Cupons usados"] = currency_table["Cupons usados"].map(format_int)
+
+    by_category = (
+        coupons.groupby("coupon_category", dropna=False)
+        .agg(usos=("coupon_category", "size"), cupons_unicos=("coupon_code_norm", "nunique"))
+        .reset_index()
+        .sort_values("usos", ascending=False)
+    )
+    by_category["% do uso"] = by_category["usos"].apply(
+        lambda value: format_pct((value / total_coupons_used * 100) if total_coupons_used else 0)
+    )
+    category_table = by_category.rename(
+        columns={
+            "coupon_category": "Categoria (3 letras)",
+            "usos": "Cupons usados",
+            "cupons_unicos": "Cupons únicos",
+        }
+    )
+    category_table["Cupons usados"] = category_table["Cupons usados"].map(format_int)
+    category_table["Cupons únicos"] = category_table["Cupons únicos"].map(format_int)
+
+    by_route = (
+        coupons.groupby("Competition", dropna=False)
+        .agg(usos=("Competition", "size"), categorias=("coupon_category", "nunique"))
+        .reset_index()
+    )
+    by_route = sort_competitions(by_route, "Competition")
+    by_route["% do uso"] = by_route["usos"].apply(
+        lambda value: format_pct((value / total_coupons_used * 100) if total_coupons_used else 0)
+    )
+    route_table = by_route.rename(
+        columns={"Competition": "Percurso", "usos": "Cupons usados", "categorias": "Categorias ativas"}
+    )
+    route_table["Cupons usados"] = route_table["Cupons usados"].map(format_int)
+    route_table["Categorias ativas"] = route_table["Categorias ativas"].map(format_int)
+
+    by_category_route = (
+        coupons.groupby(["coupon_category", "Competition"], dropna=False)
+        .agg(usos=("coupon_category", "size"))
+        .reset_index()
+        .sort_values("usos", ascending=False)
+        .head(20)
+    )
+    by_category_route = sort_competitions(by_category_route, "Competition")
+    cruzamento_table = by_category_route.rename(
+        columns={"coupon_category": "Categoria (3 letras)", "Competition": "Percurso", "usos": "Cupons usados"}
+    )
+    cruzamento_table["Cupons usados"] = cruzamento_table["Cupons usados"].map(format_int)
+
+    fig_category = px.bar(
+        by_category.head(15),
+        x="coupon_category",
+        y="usos",
+        text="usos",
+        title="Top categorias de cupom por quantidade de uso",
+    )
+    fig_category = style_bar_labels(fig_category)
+    fig_category.update_traces(texttemplate="%{text:,.0f}")
+    fig_category.update_layout(height=320, xaxis_title="Categoria (3 letras)", yaxis_title="Quantidade")
+
+    return {
+        "metrics": {
+            "total_coupons_used": format_int(total_coupons_used),
+            "unique_coupons": format_int(unique_coupons),
+            "unique_categories": format_int(unique_categories),
+            "brl_used": format_int(brl_used),
+            "usd_used": format_int(usd_used),
+        },
+        "currency_table": currency_table,
+        "category_table": category_table,
+        "route_table": route_table,
+        "cruzamento_table": cruzamento_table,
+        "category_fig": fig_category,
+    }
+
+
+def build_team_medical_company_bundle(df: pd.DataFrame) -> dict[str, object] | None:
+    """Métricas e tabelas de assessorias/atestado/empresa para tela e exportação PDF."""
+    total = len(df)
+    if total == 0:
+        return None
+
+    team_col = find_column_by_candidates(df.columns, ["Team", "Assessoria", "Assesoria", "Training team"])
+    medical_col = find_column_by_candidates(df.columns, ["medical_term", "medical term", "medical"])
+    company_col = find_column_by_candidates(df.columns, ["company", "empresa"])
+
+    if company_col:
+        company_txt = df[company_col].astype(str).str.strip()
+        company_filled_mask = (~company_txt.isin(["", "nan", "None", "none", "NaN"])) & company_txt.notna()
+        company_filled = int(company_filled_mask.sum())
+    else:
+        company_filled = 0
+
+    if medical_col:
+        medical_txt = df[medical_col].astype(str).str.strip()
+        medical_link_mask = medical_txt.str.contains(r"(https?://|www\.)", case=False, regex=True, na=False)
+        medical_uploaded = int(medical_link_mask.sum())
+    else:
+        medical_uploaded = 0
+
+    bundle: dict[str, object] = {
+        "total": format_int(total),
+        "company_filled": format_int(company_filled),
+        "company_pct": format_pct((company_filled / total) * 100 if total else 0),
+        "medical_uploaded": format_int(medical_uploaded),
+        "medical_pct": format_pct((medical_uploaded / total) * 100 if total else 0),
+        "team_table": None,
+        "team_fig": None,
+        "has_team": False,
+    }
+
+    if not team_col:
+        return bundle
+
+    team_raw = df[team_col].astype(str).str.strip()
+    valid_team = team_raw.replace({"nan": pd.NA, "None": pd.NA, "none": pd.NA, "": pd.NA}).dropna()
+    if valid_team.empty:
+        return bundle
+
+    team_df = valid_team.rename("team_raw").to_frame()
+    team_df["team_key"] = team_df["team_raw"].apply(canonicalize_team_name)
+    team_df = team_df[team_df["team_key"] != ""].copy()
+    team_df = team_df[~team_df["team_key"].str.contains(r"\bavulso\b", na=False)].copy()
+    if team_df.empty:
+        return bundle
+
+    team_grouped = (
+        team_df.groupby("team_key", as_index=False)
+        .agg(atletas=("team_raw", "size"), assessoria=("team_raw", lambda s: s.value_counts().idxmax()))
+        .sort_values("atletas", ascending=False)
+        .head(10)
+        .reset_index(drop=True)
+    )
+    team_grouped["% dos inscritos"] = team_grouped["atletas"].apply(
+        lambda v: format_pct((v / total) * 100 if total else 0)
+    )
+    team_grouped = team_grouped.rename(columns={"assessoria": "Assessoria", "atletas": "Atletas"})
+    fig_team = px.bar(team_grouped, x="Assessoria", y="Atletas", text="Atletas", title="Top 10 assessorias inscritas")
+    fig_team = style_bar_labels(fig_team)
+    fig_team.update_layout(height=360, xaxis_tickangle=-25)
+
+    bundle["team_table"] = team_grouped[["Assessoria", "Atletas", "% dos inscritos"]]
+    bundle["team_fig"] = fig_team
+    bundle["has_team"] = True
+    return bundle
+
+
+def build_registration_cadence_figures(
+    df: pd.DataFrame,
+    start_date: date,
+    ref_ts: pd.Timestamp | None,
+    daily_sales_window: int | None = None,
+) -> list[go.Figure]:
+    """Figuras de cadência de inscrições (vendas diárias, semanal, mensal)."""
+    figures: list[go.Figure] = []
+    if df.empty or "Registration date" not in df.columns:
+        return figures
+
+    ref_day = _resolve_reference_date(df, ref_ts)
+    reg = pd.to_datetime(df["Registration date"], errors="coerce")
+    mask_valid = reg.notna()
+    if not mask_valid.any():
+        return figures
+
+    reg_dates = reg.dt.normalize().dt.date
+
+    if daily_sales_window:
+        daily_sales_fig = _build_daily_sales_chart(df, days_window=daily_sales_window)
+        if daily_sales_fig is not None:
+            figures.append(daily_sales_fig)
+
+    cur_monday = ref_day - pd.Timedelta(days=ref_day.weekday()).to_pytimedelta()
+    week_x: list[str] = []
+    week_y: list[int] = []
+    week_cd: list[tuple[str, str]] = []
+    for offset in range(5, -1, -1):
+        ws = cur_monday - pd.Timedelta(days=7 * offset).to_pytimedelta()
+        we = ws + pd.Timedelta(days=6).to_pytimedelta()
+        iso_y, iso_w, _ = ws.isocalendar()
+        cnt = int(((reg_dates >= ws) & (reg_dates <= we)).sum())
+        week_x.append(f"S{iso_w:02d}/{iso_y}")
+        week_y.append(cnt)
+        week_cd.append((ws.strftime("%d/%m/%Y"), we.strftime("%d/%m/%Y")))
+
+    fig_w = go.Figure(
+        go.Bar(
+            x=week_x,
+            y=week_y,
+            marker_color=_blue_gradient_colors(week_y),
+            text=[format_int(c) for c in week_y],
+            textposition="outside",
+            cliponaxis=False,
+            customdata=week_cd,
+            hovertemplate=(
+                "<b>%{x}</b><br>%{customdata[0]} – %{customdata[1]}<br>Inscritos: %{y}<extra></extra>"
+            ),
+        )
+    )
+    fig_w.update_layout(
+        title="Inscritos por semana — últimas 6 semanas",
+        yaxis_title="Inscritos",
+        xaxis_title="Semana ISO",
+        height=340,
+        margin=dict(t=56, b=48),
+    )
+    apply_brand_chart_style(fig_w)
+    figures.append(fig_w)
+
+    start_period = pd.Timestamp(start_date).to_period("M")
+    end_period = pd.Timestamp(ref_day).to_period("M")
+    if start_period <= end_period:
+        months_idx = pd.period_range(start=start_period, end=end_period, freq="M")
+        sub = df.loc[mask_valid].copy()
+        sub["_m"] = pd.to_datetime(sub["Registration date"], errors="coerce").dt.to_period("M")
+        month_counts = sub.groupby("_m").size().reindex(months_idx, fill_value=0).astype(int)
+        month_labels = [f"{p.month:02d}/{p.year}" for p in months_idx]
+        fig_m = go.Figure(
+            go.Bar(
+                x=month_labels,
+                y=month_counts.values,
+                marker_color=BRAND_COLORWAY[1],
+                text=[format_int(int(v)) for v in month_counts.values],
+                textposition="outside",
+                cliponaxis=False,
+                hovertemplate="Mês: %{x}<br>Inscritos: %{y}<extra></extra>",
+            )
+        )
+        fig_m.update_layout(
+            title=(
+                f"Inscritos por mês — desde {start_date.strftime('%d/%m/%Y')} "
+                f"(até {ref_day.strftime('%d/%m/%Y')})"
+            ),
+            xaxis_title="Mês",
+            yaxis_title="Inscritos",
+            height=360,
+            margin=dict(t=56, b=56),
+        )
+        apply_brand_chart_style(fig_m)
+        figures.append(fig_m)
+    return figures
+
+
+def build_progress_projection_bundle(
+    df: pd.DataFrame,
+    targets: dict[str, int],
+    start_date: date,
+    end_date: date,
+    ref_ts: pd.Timestamp | None,
+    daily_sales_window: int | None = None,
+) -> dict[str, object]:
+    """Dados e figuras de projeções/ritmo para tela e exportação PDF."""
+    summary = build_route_summary(df, targets)
+    table = summary.copy()
+    table["Meta"] = table["meta"].map(format_int)
+    table["Inscritos atuais"] = table["inscritos"].map(format_int)
+    table["% meta"] = table["pct_meta"].map(format_pct)
+    table["% mulheres"] = table["pct_mulheres"].map(format_pct)
+    route_table = table[["Percurso", "Meta", "Inscritos atuais", "% meta", "% mulheres"]]
+
+    comp_counts = summary[summary["Percurso"] != "TOTAL"]
+    meta_total = int(comp_counts["meta"].sum())
+    total = len(df)
+    elapsed_days = max((date.today() - start_date).days, 0)
+    total_days = max((end_date - start_date).days, 1)
+    pct_elapsed = min(elapsed_days / total_days * 100, 100)
+    pct_meta = (total / meta_total * 100) if meta_total else 0
+
+    series = (
+        df.dropna(subset=["Registration date"])
+        .assign(day=lambda d: d["Registration date"].dt.date)
+        .groupby("day")
+        .size()
+        .reset_index(name="inscricoes_diarias")
+        .sort_values("day")
+    )
+
+    bundle: dict[str, object] = {
+        "route_table": route_table,
+        "metas_fig": build_weekly_metas_bullet_figure(summary),
+        "cadence_figs": build_registration_cadence_figures(df, start_date, ref_ts, daily_sales_window),
+        "pct_elapsed": format_pct(pct_elapsed),
+        "pct_meta": format_pct(pct_meta),
+        "ma_fig": None,
+        "projections": {},
+        "has_series": not series.empty,
+    }
+
+    if series.empty:
+        return bundle
+
+    series["mm7"] = series["inscricoes_diarias"].rolling(7, min_periods=1).mean()
+    series["mm15"] = series["inscricoes_diarias"].rolling(15, min_periods=1).mean()
+    series["mm30"] = series["inscricoes_diarias"].rolling(30, min_periods=1).mean()
+    fig_mm, projs = build_weekly_ma_projection_figure(series, total, end_date)
+    bundle["ma_fig"] = fig_mm
+    bundle["projections"] = {k: format_int(v) for k, v in projs.items()}
+    return bundle
 
 
 def render_marketing_diario(
@@ -2465,7 +2948,28 @@ def render_marketing_diario(
         with button_col_left:
             st.caption(caption_flash if variant == "flash" else caption_exec)
         with button_col_right:
-            _render_pdf_button(pdf_label, key=pdf_key)
+            if variant == "executivo":
+                def _build_diario_executivo_html() -> str:
+                    from pdf_export import build_diario_executivo_html
+
+                    return build_diario_executivo_html(
+                        scoped=scoped,
+                        percurso_targets=percurso_targets,
+                        data_base_label=data_base_label,
+                        data_base_ts=data_base_ts,
+                        start_date=start_date,
+                        end_date=end_date,
+                        ibge_df=ibge_df,
+                    )
+
+                _render_pdf_download(
+                    pdf_label,
+                    key=pdf_key,
+                    file_name=f"diario_executivo_{ref_day.isoformat()}.pdf",
+                    html_builder=_build_diario_executivo_html,
+                )
+            else:
+                _render_pdf_button(pdf_label, key=pdf_key)
 
     kpi_items = _build_marketing_diario_kpi_items(scoped, today_df, deltas, percurso_targets)
     render_marketing_kpi_cards(kpi_items)
@@ -2979,18 +3483,10 @@ def render_registration_cadence_charts(
     Se ``daily_sales_window`` for informado, renderiza antes o gráfico de vendas
     diárias dos últimos N dias.
     """
-    if df.empty or "Registration date" not in df.columns:
+    figures = build_registration_cadence_figures(df, start_date, ref_ts, daily_sales_window)
+    if not figures:
         st.info("Sem datas de inscrição para montar os gráficos por semana/mês.")
         return
-
-    ref_day = _resolve_reference_date(df, ref_ts)
-    reg = pd.to_datetime(df["Registration date"], errors="coerce")
-    mask_valid = reg.notna()
-    if not mask_valid.any():
-        st.info("Sem datas válidas para montar os gráficos por semana/mês.")
-        return
-
-    reg_dates = reg.dt.normalize().dt.date
 
     if daily_sales_window:
         st.markdown(
@@ -2998,11 +3494,8 @@ def render_registration_cadence_charts(
             unsafe_allow_html=True,
         )
         st.caption("Vendas (inscrições) por dia. A legenda mostra a data e o nº de vendas de cada dia.")
-        daily_sales_fig = _build_daily_sales_chart(df, days_window=daily_sales_window)
-        if daily_sales_fig is not None:
-            st.plotly_chart(daily_sales_fig, use_container_width=True)
-        else:
-            st.info(f"Sem datas válidas para montar o gráfico de vendas dos últimos {daily_sales_window} dias.")
+        st.plotly_chart(figures[0], use_container_width=True)
+        figures = figures[1:]
 
     st.markdown(
         '<div class="mkt-section-title">Volume por semana e por mês</div>',
@@ -3012,80 +3505,8 @@ def render_registration_cadence_charts(
         "Seis semanas em calendário ISO (segunda a domingo), terminando na semana da data de referência. "
         "Meses alinhados ao início da campanha na barra lateral."
     )
-
-    cur_monday = ref_day - pd.Timedelta(days=ref_day.weekday()).to_pytimedelta()
-    week_x: list[str] = []
-    week_y: list[int] = []
-    week_cd: list[tuple[str, str]] = []
-    for offset in range(5, -1, -1):
-        ws = cur_monday - pd.Timedelta(days=7 * offset).to_pytimedelta()
-        we = ws + pd.Timedelta(days=6).to_pytimedelta()
-        iso_y, iso_w, _ = ws.isocalendar()
-        cnt = int(((reg_dates >= ws) & (reg_dates <= we)).sum())
-        week_x.append(f"S{iso_w:02d}/{iso_y}")
-        week_y.append(cnt)
-        week_cd.append((ws.strftime("%d/%m/%Y"), we.strftime("%d/%m/%Y")))
-
-    fig_w = go.Figure(
-        go.Bar(
-            x=week_x,
-            y=week_y,
-            marker_color=_blue_gradient_colors(week_y),
-            text=[format_int(c) for c in week_y],
-            textposition="outside",
-            cliponaxis=False,
-            customdata=week_cd,
-            hovertemplate=(
-                "<b>%{x}</b><br>%{customdata[0]} – %{customdata[1]}<br>"
-                "Inscritos: %{y}<extra></extra>"
-            ),
-        )
-    )
-    fig_w.update_layout(
-        title="Inscritos por semana — últimas 6 semanas",
-        yaxis_title="Inscritos",
-        xaxis_title="Semana ISO",
-        height=340,
-        margin=dict(t=56, b=48),
-    )
-    apply_brand_chart_style(fig_w)
-    st.plotly_chart(fig_w, use_container_width=True)
-
-    start_period = pd.Timestamp(start_date).to_period("M")
-    end_period = pd.Timestamp(ref_day).to_period("M")
-    if start_period > end_period:
-        st.warning("Início da campanha está depois da data de referência; gráfico mensal omitido.")
-        return
-
-    months_idx = pd.period_range(start=start_period, end=end_period, freq="M")
-    sub = df.loc[mask_valid].copy()
-    sub["_m"] = pd.to_datetime(sub["Registration date"], errors="coerce").dt.to_period("M")
-    month_counts = sub.groupby("_m").size().reindex(months_idx, fill_value=0).astype(int)
-    month_labels = [f"{p.month:02d}/{p.year}" for p in months_idx]
-
-    fig_m = go.Figure(
-        go.Bar(
-            x=month_labels,
-            y=month_counts.values,
-            marker_color=BRAND_COLORWAY[1],
-            text=[format_int(int(v)) for v in month_counts.values],
-            textposition="outside",
-            cliponaxis=False,
-            hovertemplate="Mês: %{x}<br>Inscritos: %{y}<extra></extra>",
-        )
-    )
-    fig_m.update_layout(
-        title=(
-            f"Inscritos por mês — desde {start_date.strftime('%d/%m/%Y')} "
-            f"(até {ref_day.strftime('%d/%m/%Y')})"
-        ),
-        xaxis_title="Mês",
-        yaxis_title="Inscritos",
-        height=360,
-        margin=dict(t=56, b=56),
-    )
-    apply_brand_chart_style(fig_m)
-    st.plotly_chart(fig_m, use_container_width=True)
+    for fig in figures:
+        st.plotly_chart(fig, use_container_width=True)
 
 
 def render_progress_projection(
@@ -3372,123 +3793,63 @@ def render_marketing_target_gauges(
 
 def render_demography(df: pd.DataFrame, expandido: bool = False) -> None:
     st.header("Demografia")
-    valid_age = df["age"].dropna()
+    bundle = build_demography_bundle(df, expandido=expandido)
     c1, c2, c3 = st.columns(3)
-    c1.metric("Idade média", format_int(valid_age.mean() if not valid_age.empty else 0))
-    c2.metric("Idade mínima", format_int(valid_age.min() if not valid_age.empty else 0))
-    c3.metric("Idade máxima", format_int(valid_age.max() if not valid_age.empty else 0))
+    c1.metric("Idade média", bundle["idade_media"])
+    c2.metric("Idade mínima", bundle["idade_min"])
+    c3.metric("Idade máxima", bundle["idade_max"])
 
-    if not valid_age.empty:
-        hist = ff.create_distplot([valid_age], ["Idade"], show_hist=True, show_rug=False, bin_size=2)
-        hist.update_layout(height=320)
-        st.plotly_chart(hist, use_container_width=True)
+    if bundle["age_hist_fig"] is not None:
+        st.plotly_chart(bundle["age_hist_fig"], use_container_width=True)
 
     if not expandido:
         return
 
     st.subheader("Gênero")
-    gender_col = find_column_by_candidates(df.columns, AI_GENDER_CANDIDATES)
-    if not gender_col:
+    if not bundle["has_gender"]:
         st.info("Coluna de gênero não disponível para análise.")
     else:
-        gender_raw = df[gender_col].astype(str).str.strip().str.lower()
-        gender_norm = pd.Series(pd.NA, index=df.index, dtype="object")
-        gender_norm.loc[gender_raw.isin(AI_FEMALE_TOKENS)] = "Feminino"
-        gender_norm.loc[gender_raw.isin(AI_MALE_TOKENS)] = "Masculino"
-        gender_counts = (
-            gender_norm.dropna().value_counts().reindex(["Feminino", "Masculino"], fill_value=0)
-            .rename_axis("Gênero")
-            .reset_index(name="Inscritos")
-        )
-        total_gender = gender_counts["Inscritos"].sum()
-        gender_counts["%"] = gender_counts["Inscritos"].apply(
-            lambda v: format_pct((v / total_gender) * 100 if total_gender else 0)
-        )
         col_a, col_b = st.columns(2)
-        col_a.dataframe(gender_counts, hide_index=True, use_container_width=True)
-        pie_gender = px.pie(gender_counts, names="Gênero", values="Inscritos", hole=0.45)
-        pie_gender.update_layout(height=320)
-        col_b.plotly_chart(pie_gender, use_container_width=True)
+        col_a.dataframe(bundle["gender_table"], hide_index=True, use_container_width=True)
+        col_b.plotly_chart(bundle["gender_pie_fig"], use_container_width=True)
 
     st.subheader("Faixas etárias")
-    if valid_age.empty:
+    if not bundle["has_age"]:
         st.info("Sem dados de idade para montar faixas etárias.")
     else:
-        age_labels = ["18-24", "25-34", "35-44", "45-54", "55+"]
-        age_bins = pd.cut(
-            valid_age,
-            bins=[17, 24, 34, 44, 54, 120],
-            labels=age_labels,
-            include_lowest=True,
-        )
-        age_counts = (
-            age_bins.value_counts()
-            .reindex(age_labels, fill_value=0)
-            .rename_axis("Faixa")
-            .reset_index(name="Inscritos")
-        )
-        total_age = age_counts["Inscritos"].sum()
-        age_counts["%"] = age_counts["Inscritos"].apply(lambda v: format_pct((v / total_age) * 100 if total_age else 0))
         col_c, col_d = st.columns(2)
-        col_c.dataframe(age_counts, hide_index=True, use_container_width=True)
-        fig_age = px.bar(age_counts, x="Faixa", y="Inscritos", text="Inscritos")
-        fig_age = style_bar_labels(fig_age)
-        fig_age.update_layout(height=320)
-        col_d.plotly_chart(fig_age, use_container_width=True)
+        col_c.dataframe(bundle["age_table"], hide_index=True, use_container_width=True)
+        col_d.plotly_chart(bundle["age_bar_fig"], use_container_width=True)
 
 
 def render_geography(df: pd.DataFrame, ibge_df: pd.DataFrame) -> None:
     st.header("Geografia Brasil")
-    brazil = df[df["country_std"].isin(["BRAZIL", "BRASIL", "BR"])].copy()
-    if brazil.empty:
+    bundle = build_geography_bundle(df, ibge_df)
+    if bundle is None:
         st.info("Sem inscritos do Brasil para exibir nesta filtragem.")
         return
 
-    city_choices = ibge_df["City_norm"].tolist()
-    brazil["city_display"] = brazil["city"].astype(str).apply(lambda c: correct_city(c, ibge_df, city_choices))
-    brazil["city_norm"] = brazil["city_display"].map(norm_text)
-    total_brazil = len(brazil)
-    city_counts = brazil["city_display"].value_counts().rename_axis("Cidade").reset_index(name="Inscritos")
-    city_counts["% brasileiros"] = city_counts["Inscritos"].apply(lambda v: format_pct((v / total_brazil) * 100))
-    n_cidades = int(brazil["city_display"].nunique())
-    st.subheader(f"Top cidades ({n_cidades} cidades)")
-    st.dataframe(city_counts, hide_index=True, use_container_width=True)
-
-    merged = brazil.merge(ibge_df[["City_norm", "UF", "Região"]], left_on="city_norm", right_on="City_norm", how="left")
-    uf_counts = merged["UF"].fillna("NA").value_counts().rename_axis("UF").reset_index(name="Inscritos")
-    uf_counts["% brasileiros"] = uf_counts["Inscritos"].apply(lambda v: format_pct((v / total_brazil) * 100))
-    uf_counts = uf_counts.sort_values("Inscritos", ascending=False)
-    reg_counts = merged["Região"].fillna("NA").value_counts().rename_axis("Regiao").reset_index(name="Inscritos")
-
-    n_ufs = int(merged["UF"].fillna("NA").nunique())
-    st.subheader(f"Top Estados ({n_ufs} estados)")
-    st.dataframe(uf_counts, hide_index=True, use_container_width=True)
-
+    st.subheader(f"Top cidades ({bundle['n_cidades']} cidades)")
+    st.dataframe(bundle["city_counts"], hide_index=True, use_container_width=True)
+    st.subheader(f"Top Estados ({bundle['n_ufs']} estados)")
+    st.dataframe(bundle["uf_counts"], hide_index=True, use_container_width=True)
     st.subheader("Regiões do Brasil")
     col1, col2 = st.columns(2)
-    col1.dataframe(reg_counts.sort_values("Inscritos", ascending=False), hide_index=True, use_container_width=True)
-    pie = px.pie(reg_counts, names="Regiao", values="Inscritos", hole=0.4)
-    pie.update_layout(height=320)
-    col2.plotly_chart(pie, use_container_width=True)
+    col1.dataframe(bundle["reg_counts"], hide_index=True, use_container_width=True)
+    col2.plotly_chart(bundle["reg_pie_fig"], use_container_width=True)
     st.caption("NA = cidades sem correspondência no IBGE para mapeamento de região.")
 
 
 def render_international(df: pd.DataFrame) -> None:
     st.header("Internacional")
-    intl = df[df["nationality_std"] != "BR"].copy()
-    if intl.empty:
+    bundle = build_international_bundle(df)
+    if bundle is None:
         st.info("Sem estrangeiros para o recorte atual.")
         return
 
-    total_inscritos = len(df)
-    nat_counts = intl["nationality_std"].fillna("NA").value_counts().rename_axis("País").reset_index(name="Inscritos")
-    top_5 = nat_counts.head(5).copy()
-    top_5["% dos inscritos totais"] = top_5["Inscritos"].apply(lambda v: format_pct((v / total_inscritos) * 100))
-    st.dataframe(top_5, hide_index=True, use_container_width=True)
+    st.dataframe(bundle["top_5"], hide_index=True, use_container_width=True)
     with st.expander("Lista completa de países", expanded=st.session_state.get("print_mode", False)):
-        full = nat_counts.copy()
-        full["% dos inscritos totais"] = full["Inscritos"].apply(lambda v: format_pct((v / total_inscritos) * 100))
-        st.dataframe(full, hide_index=True, use_container_width=True)
+        st.dataframe(bundle["full"], hide_index=True, use_container_width=True)
 
 
 def render_historical(df: pd.DataFrame) -> None:
@@ -3612,75 +3973,26 @@ def render_horarios_venda(df: pd.DataFrame) -> None:
 
 def render_team_medical_company(df: pd.DataFrame) -> None:
     st.header("Assessorias, atestado e empresa")
-    total = len(df)
-    if total == 0:
+    bundle = build_team_medical_company_bundle(df)
+    if bundle is None:
         st.info("Sem dados para análise de assessorias e cadastro.")
         return
 
-    team_col = find_column_by_candidates(df.columns, ["Team", "Assessoria", "Assesoria", "Training team"])
-    medical_col = find_column_by_candidates(df.columns, ["medical_term", "medical term", "medical"])
-    company_col = find_column_by_candidates(df.columns, ["company", "empresa"])
-
-    # Indicadores de preenchimento de campos importantes para CRM/compliance.
-    if company_col:
-        company_txt = df[company_col].astype(str).str.strip()
-        company_filled_mask = (~company_txt.isin(["", "nan", "None", "none", "NaN"])) & company_txt.notna()
-        company_filled = int(company_filled_mask.sum())
-    else:
-        company_filled = 0
-
-    if medical_col:
-        medical_txt = df[medical_col].astype(str).str.strip()
-        medical_link_mask = medical_txt.str.contains(r"(https?://|www\.)", case=False, regex=True, na=False)
-        medical_uploaded = int(medical_link_mask.sum())
-    else:
-        medical_uploaded = 0
-
     c1, c2, c3 = st.columns(3)
-    c1.metric("Inscritos ativos", format_int(total))
-    c2.metric("Preencheram company", format_int(company_filled))
-    c2.caption(format_pct((company_filled / total) * 100 if total else 0))
-    c3.metric("Subiram atestado (medical_term)", format_int(medical_uploaded))
-    c3.caption(format_pct((medical_uploaded / total) * 100 if total else 0))
+    c1.metric("Inscritos ativos", bundle["total"])
+    c2.metric("Preencheram company", bundle["company_filled"])
+    c2.caption(bundle["company_pct"])
+    c3.metric("Subiram atestado (medical_term)", bundle["medical_uploaded"])
+    c3.caption(bundle["medical_pct"])
 
     st.subheader("Top 10 assessorias (Team)")
-    if not team_col:
-        st.info("Coluna Team não disponível nesta base.")
+    if not bundle["has_team"]:
+        st.info("Coluna Team não disponível ou sem dados consolidados nesta base.")
         return
-
-    team_raw = df[team_col].astype(str).str.strip()
-    valid_team = team_raw.replace({"nan": pd.NA, "None": pd.NA, "none": pd.NA, "": pd.NA}).dropna()
-    if valid_team.empty:
-        st.info("Nenhum valor de Team preenchido no recorte atual.")
-        return
-
-    team_df = valid_team.rename("team_raw").to_frame()
-    team_df["team_key"] = team_df["team_raw"].apply(canonicalize_team_name)
-    team_df = team_df[team_df["team_key"] != ""].copy()
-    team_df = team_df[~team_df["team_key"].str.contains(r"\bavulso\b", na=False)].copy()
-    if team_df.empty:
-        st.info("Não foi possível consolidar os nomes de Team.")
-        return
-
-    team_grouped = (
-        team_df.groupby("team_key", as_index=False)
-        .agg(
-            atletas=("team_raw", "size"),
-            assessoria=("team_raw", lambda s: s.value_counts().idxmax()),
-        )
-        .sort_values("atletas", ascending=False)
-        .head(10)
-        .reset_index(drop=True)
-    )
-    team_grouped["% dos inscritos"] = team_grouped["atletas"].apply(lambda v: format_pct((v / total) * 100 if total else 0))
-    team_grouped = team_grouped.rename(columns={"assessoria": "Assessoria", "atletas": "Atletas"})
 
     t1, t2 = st.columns(2)
-    t1.dataframe(team_grouped[["Assessoria", "Atletas", "% dos inscritos"]], hide_index=True, use_container_width=True)
-    fig_team = px.bar(team_grouped, x="Assessoria", y="Atletas", text="Atletas", title="Top 10 assessorias inscritas")
-    fig_team = style_bar_labels(fig_team)
-    fig_team.update_layout(height=360, xaxis_tickangle=-25)
-    t2.plotly_chart(fig_team, use_container_width=True)
+    t1.dataframe(bundle["team_table"], hide_index=True, use_container_width=True)
+    t2.plotly_chart(bundle["team_fig"], use_container_width=True)
 
 
 def render_perfil_inscrito(df: pd.DataFrame, ibge_df: pd.DataFrame) -> None:
@@ -4179,129 +4491,28 @@ def render_financial_report(df: pd.DataFrame) -> None:
 
 def render_marketing_coupon_block(df: pd.DataFrame) -> None:
     st.header("CUPOM DE DESCONTOS")
-    coupon_code_clean = df["coupon_code"].fillna("").astype(str).str.strip()
-    coupon_code_clean = coupon_code_clean.replace({"nan": "", "None": "", "none": ""})
-    coupon_code_norm = coupon_code_clean.str.upper().str.replace(r"[^A-Z0-9]", "", regex=True)
-    coupons = df[coupon_code_norm.str.len().ge(3)].copy()
-    if coupons.empty:
+    bundle = build_coupon_bundle(df)
+    if bundle is None:
         st.info("Nenhum cupom válido (3+ caracteres) encontrado no recorte atual.")
         return
 
-    coupons["coupon_code_norm"] = coupon_code_norm.loc[coupons.index]
-    coupons["coupon_category"] = coupons["coupon_code_norm"].str[:3]
-
-    total_coupons_used = int(len(coupons))
-    unique_coupons = int(coupons["coupon_code_norm"].nunique())
-    unique_categories = int(coupons["coupon_category"].nunique())
-    brl_used = int(coupons["edition_currency"].eq("BRL").sum())
-    usd_used = int(coupons["edition_currency"].eq("USD").sum())
-
+    metrics = bundle["metrics"]
     m1, m2, m3, m4, m5 = st.columns(5)
-    m1.metric("Cupons usados (inscrições)", format_int(total_coupons_used))
-    m2.metric("Cupons únicos", format_int(unique_coupons))
-    m3.metric("Categorias únicas (3 letras)", format_int(unique_categories))
-    m4.metric("Uso em BRL", format_int(brl_used))
-    m5.metric("Uso em USD", format_int(usd_used))
+    m1.metric("Cupons usados (inscrições)", metrics["total_coupons_used"])
+    m2.metric("Cupons únicos", metrics["unique_coupons"])
+    m3.metric("Categorias únicas (3 letras)", metrics["unique_categories"])
+    m4.metric("Uso em BRL", metrics["brl_used"])
+    m5.metric("Uso em USD", metrics["usd_used"])
 
-    by_currency = (
-        coupons.groupby("edition_currency", dropna=False)
-        .agg(usos=("edition_currency", "size"))
-        .reset_index()
-        .sort_values("usos", ascending=False)
-    )
-    by_currency["% do uso"] = by_currency["usos"].apply(
-        lambda value: format_pct((value / total_coupons_used * 100) if total_coupons_used else 0)
-    )
-    currency_table = by_currency.rename(
-        columns={
-            "edition_currency": "Planilha",
-            "usos": "Cupons usados",
-        }
-    )
-    currency_table["Planilha"] = currency_table["Planilha"].replace({"BRL": "BRL", "USD": "US"})
-    currency_table["Cupons usados"] = currency_table["Cupons usados"].map(format_int)
     st.subheader("Uso por planilha (BRL e US)")
-    st.dataframe(currency_table, hide_index=True, use_container_width=True)
-
-    by_category = (
-        coupons.groupby("coupon_category", dropna=False)
-        .agg(
-            usos=("coupon_category", "size"),
-            cupons_unicos=("coupon_code_norm", "nunique"),
-        )
-        .reset_index()
-        .sort_values("usos", ascending=False)
-    )
-    by_category["% do uso"] = by_category["usos"].apply(
-        lambda value: format_pct((value / total_coupons_used * 100) if total_coupons_used else 0)
-    )
-    category_table = by_category.rename(
-        columns={
-            "coupon_category": "Categoria (3 letras)",
-            "usos": "Cupons usados",
-            "cupons_unicos": "Cupons únicos",
-        }
-    )
-    category_table["Cupons usados"] = category_table["Cupons usados"].map(format_int)
-    category_table["Cupons únicos"] = category_table["Cupons únicos"].map(format_int)
+    st.dataframe(bundle["currency_table"], hide_index=True, use_container_width=True)
     st.subheader("Uso por tipo/categoria de cupom")
-    st.dataframe(category_table, hide_index=True, use_container_width=True)
-
-    by_route = (
-        coupons.groupby("Competition", dropna=False)
-        .agg(
-            usos=("Competition", "size"),
-            categorias=("coupon_category", "nunique"),
-        )
-        .reset_index()
-    )
-    by_route = sort_competitions(by_route, "Competition")
-    by_route["% do uso"] = by_route["usos"].apply(
-        lambda value: format_pct((value / total_coupons_used * 100) if total_coupons_used else 0)
-    )
-    route_table = by_route.rename(
-        columns={
-            "Competition": "Percurso",
-            "usos": "Cupons usados",
-            "categorias": "Categorias ativas",
-        }
-    )
-    route_table["Cupons usados"] = route_table["Cupons usados"].map(format_int)
-    route_table["Categorias ativas"] = route_table["Categorias ativas"].map(format_int)
+    st.dataframe(bundle["category_table"], hide_index=True, use_container_width=True)
     st.subheader("Uso por percurso")
-    st.dataframe(route_table, hide_index=True, use_container_width=True)
-
-    by_category_route = (
-        coupons.groupby(["coupon_category", "Competition"], dropna=False)
-        .agg(usos=("coupon_category", "size"))
-        .reset_index()
-        .sort_values("usos", ascending=False)
-        .head(20)
-    )
-    by_category_route = sort_competitions(by_category_route, "Competition")
-    cruzamento_table = by_category_route.rename(
-        columns={
-            "coupon_category": "Categoria (3 letras)",
-            "Competition": "Percurso",
-            "usos": "Cupons usados",
-        }
-    )
-    cruzamento_table["Cupons usados"] = cruzamento_table["Cupons usados"].map(format_int)
+    st.dataframe(bundle["route_table"], hide_index=True, use_container_width=True)
     st.subheader("Cruzamento categoria x percurso (Top 20)")
-    st.dataframe(cruzamento_table, hide_index=True, use_container_width=True)
-
-    fig_category = px.bar(
-        by_category.head(15),
-        x="coupon_category",
-        y="usos",
-        text="usos",
-        title="Top categorias de cupom por quantidade de uso",
-    )
-    fig_category = style_bar_labels(fig_category)
-    fig_category.update_traces(texttemplate="%{text:,.0f}")
-    fig_category.update_layout(height=320, xaxis_title="Categoria (3 letras)", yaxis_title="Quantidade")
-    st.plotly_chart(fig_category, use_container_width=True)
-
+    st.dataframe(bundle["cruzamento_table"], hide_index=True, use_container_width=True)
+    st.plotly_chart(bundle["category_fig"], use_container_width=True)
     st.caption(
         "Análise gerencial baseada na coluna `Discount codes` (BRL e US). "
         "Categoria definida pelas 3 primeiras letras do cupom."

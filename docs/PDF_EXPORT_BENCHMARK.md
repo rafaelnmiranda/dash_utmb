@@ -43,3 +43,34 @@ Implementar **Opcao A otimizada** no app atual para ganho imediato:
 - impressao de tabs e expanders com foco em completude do PDF.
 
 Mantemos **Opcao B** como proximo passo se o padrao executivo exigir consistencia total entre ambientes.
+
+## Atualizacao (jun/2026) — Opcao B no piloto WeasyPrint
+
+A **Opcao B** foi implementada como piloto no relatorio **Marketing Diario — Executivo**:
+
+| Componente | Arquivo | Papel |
+|---|---|---|
+| Geracao HTML + PDF | `pdf_export.py` | Template Jinja2, CSS A4, `WeasyPrint`, graficos Plotly via `kaleido` |
+| Builders de dados | `dashboard_2026.py` | `build_demography_bundle`, `build_geography_bundle`, `build_international_bundle`, `build_coupon_bundle`, `build_team_medical_company_bundle`, `build_progress_projection_bundle`, `build_registration_cadence_figures` |
+| Download real | `dashboard_2026.py` | `_render_pdf_download` → `st.download_button` com `application/pdf` |
+| Infra Streamlit Cloud | `packages.txt` + `requirements.txt` | `weasyprint`, `kaleido==0.2.1`, `jinja2` + libs de sistema (Pango, Cairo) |
+
+### Fluxo
+
+1. Usuario clica em **Baixar PDF do Diario (Executivo)**.
+2. Backend monta HTML com os mesmos numeros da tela (builders compartilhados).
+3. Graficos Plotly viram PNG (`kaleido`) embutidos no HTML.
+4. WeasyPrint gera bytes PDF.
+5. `st.download_button` entrega arquivo `.pdf` real.
+
+### Expansao planejada
+
+Repetir o padrao `build_<tipo>_html` + `_render_pdf_download` para:
+
+- Marketing Diario — Flash
+- Marketing Semanal
+- Geral
+- Financeiro
+- Mercado Pago
+
+Os demais relatorios continuam com **Opcao A** (`window.print`) ate migracao individual.
