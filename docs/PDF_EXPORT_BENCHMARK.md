@@ -58,7 +58,7 @@ A **Opcao B** foi implementada como piloto no relatorio **Marketing Diario — E
 
 ### packages.txt (runtime only, sem `-dev`)
 
-`libcairo2`, `libpango-1.0-0`, `libpangocairo-1.0-0`, `libpangoft2-1.0-0`, `libgdk-pixbuf2.0-0`, `libglib2.0-0`, `shared-mime-info`, `fonts-dejavu-core`
+`libcairo2`, `libpango-1.0-0`, `libpangocairo-1.0-0`, `libpangoft2-1.0-0`, `libgdk-pixbuf-2.0-0`, `libglib2.0-0`, `shared-mime-info`, `fonts-dejavu-core`
 
 ### Fluxo
 
