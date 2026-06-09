@@ -53,7 +53,12 @@ A **Opcao B** foi implementada como piloto no relatorio **Marketing Diario — E
 | Geracao HTML + PDF | `pdf_export.py` | Template Jinja2, CSS A4, `WeasyPrint`, graficos Plotly via `kaleido` |
 | Builders de dados | `dashboard_2026.py` | `build_demography_bundle`, `build_geography_bundle`, `build_international_bundle`, `build_coupon_bundle`, `build_team_medical_company_bundle`, `build_progress_projection_bundle`, `build_registration_cadence_figures` |
 | Download real | `dashboard_2026.py` | `_render_pdf_download` → `st.download_button` com `application/pdf` |
-| Infra Streamlit Cloud | `packages.txt` + `requirements.txt` | `weasyprint`, `kaleido==0.2.1`, `jinja2` + libs de sistema (Pango, Cairo) |
+| Infra Streamlit Cloud | `packages.txt` + `requirements.txt` | `weasyprint`, `kaleido==0.2.1`, `pillow<12`, libs Pango/Cairo/GLib via apt |
+| Verificacao | `scripts/verify_pdf_deps.py` | Smoke test kaleido + WeasyPrint antes do deploy |
+
+### packages.txt (runtime only, sem `-dev`)
+
+`libcairo2`, `libpango-1.0-0`, `libpangocairo-1.0-0`, `libpangoft2-1.0-0`, `libgdk-pixbuf2.0-0`, `libglib2.0-0`, `shared-mime-info`, `fonts-dejavu-core`
 
 ### Fluxo
 

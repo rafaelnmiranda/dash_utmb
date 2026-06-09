@@ -2070,15 +2070,13 @@ def _render_pdf_button(label: str, key: str) -> None:
         components.html("<script>window.print();</script>", height=0, width=0)
 
 
+@st.cache_resource
 def _pdf_server_side_available() -> bool:
-    """PDF server-side só funciona se weasyprint e kaleido estiverem instalados."""
+    """True apenas se weasyprint e kaleido importam (pip + libs de sistema OK)."""
     try:
-        import importlib.util
-
-        return (
-            importlib.util.find_spec("weasyprint") is not None
-            and importlib.util.find_spec("kaleido") is not None
-        )
+        import weasyprint  # noqa: F401
+        import kaleido  # noqa: F401
+        return True
     except Exception:
         return False
 
